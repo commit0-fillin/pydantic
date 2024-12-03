@@ -204,7 +204,16 @@ def field_serializer(*fields: str, mode: Literal['plain', 'wrap']='plain', retur
     Returns:
         The decorator function.
     """
-    pass
+    def decorator(f: Any) -> Any:
+        dec_info = FieldSerializerDecoratorInfo(
+            fields=fields,
+            mode=mode,
+            return_type=return_type,
+            when_used=when_used,
+            check_fields=check_fields
+        )
+        return PydanticDescriptorProxy(f, dec_info)
+    return decorator
 FuncType = TypeVar('FuncType', bound=Callable[..., Any])
 
 def model_serializer(f: Callable[..., Any] | None=None, /, *, mode: Literal['plain', 'wrap']='plain', when_used: Literal['always', 'unless-none', 'json', 'json-unless-none']='always', return_type: Any=PydanticUndefined) -> Callable[[Any], Any]:
@@ -249,7 +258,18 @@ def model_serializer(f: Callable[..., Any] | None=None, /, *, mode: Literal['pla
     Returns:
         The decorator function.
     """
-    pass
+    def decorator(func: Callable[..., Any]) -> Any:
+        dec_info = ModelSerializerDecoratorInfo(
+            mode=mode,
+            when_used=when_used,
+            return_type=return_type
+        )
+        return PydanticDescriptorProxy(func, dec_info)
+
+    if f is None:
+        return decorator
+    else:
+        return decorator(f)
 AnyType = TypeVar('AnyType')
 if TYPE_CHECKING:
     SerializeAsAny = Annotated[AnyType, ...]
