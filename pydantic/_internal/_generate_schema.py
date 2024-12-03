@@ -69,7 +69,11 @@ def check_validator_fields_against_field_name(info: FieldDecoratorInfo, field: s
     Returns:
         `True` if field name is in validator fields, `False` otherwise.
     """
-    pass
+    if info.fields == '*':
+        return True
+    if isinstance(info.fields, str):
+        return info.fields == field
+    return field in info.fields
 
 def check_decorator_fields_exist(decorators: Iterable[AnyFieldDecorator], fields: Iterable[str]) -> None:
     """Check if the defined fields in decorators exist in `fields` param.
@@ -83,7 +87,15 @@ def check_decorator_fields_exist(decorators: Iterable[AnyFieldDecorator], fields
     Raises:
         PydanticUserError: If one of the field names does not exist in `fields` param.
     """
-    pass
+    fields_set = set(fields)
+    for decorator in decorators:
+        if decorator.check_fields and decorator.fields != '*':
+            for field in (decorator.fields if isinstance(decorator.fields, Iterable) else [decorator.fields]):
+                if field not in fields_set:
+                    raise PydanticUserError(
+                        f"Field '{field}' does not exist on this model.",
+                        code='validator-field-error',
+                    )
 
 def modify_model_json_schema(schema_or_field: CoreSchemaOrField, handler: GetJsonSchemaHandler, *, cls: Any, title: str | None=None) -> JsonSchemaValue:
     """Add title and description for model-like classes' JSON schema.
@@ -97,7 +109,17 @@ def modify_model_json_schema(schema_or_field: CoreSchemaOrField, handler: GetJso
     Returns:
         JsonSchemaValue: The updated JSON schema.
     """
-    pass
+    json_schema = handler(schema_or_field)
+    
+    if title is None:
+        title = cls.__name__
+    
+    json_schema['title'] = title
+    
+    if cls.__doc__:
+        json_schema['description'] = inspect.cleandoc(cls.__doc__)
+    
+    return json_schema
 JsonEncoders = Dict[Type[Any], JsonEncoder]
 
 def _add_custom_serialization_from_json_encoders(json_encoders: JsonEncoders | None, tp: Any, schema: CoreSchema) -> CoreSchema:
@@ -108,7 +130,17 @@ def _add_custom_serialization_from_json_encoders(json_encoders: JsonEncoders | N
         tp: The type to check for a matching encoder.
         schema: The schema to add the encoder to.
     """
-    pass
+    if json_encoders is None:
+        return schema
+
+    for encoder_type, encoder in json_encoders.items():
+        if isinstance(tp, encoder_type):
+            return core_schema.json_or_python_schema(
+                json_schema=core_schema.with_info_plain_validator_function(encoder),
+                python_schema=schema,
+            )
+    
+    return schema
 TypesNamespace = Union[Dict[str, Any], None]
 
 class TypesNamespaceStack:
@@ -123,7 +155,7 @@ def _get_first_non_null(a: Any, b: Any) -> Any:
     Use case: serialization_alias (argument a) and alias (argument b) are both defined, and serialization_alias is ''.
     This function will return serialization_alias, which is the first argument, even though it is an empty string.
     """
-    pass
+    return a if a is not None else b
 
 class GenerateSchema:
     """Generate core schema for a Pydantic model, dataclass and types like `str`, `datetime`, ... ."""
@@ -139,7 +171,7 @@ class GenerateSchema:
 
     def str_schema(self) -> CoreSchema:
         """Generate a CoreSchema for `str`"""
-        pass
+        return core_schema.str_schema()
 
     class CollectedInvalid(Exception):
         pass
@@ -167,7 +199,19 @@ class GenerateSchema:
                 - If `typing.TypedDict` is used instead of `typing_extensions.TypedDict` on Python < 3.12.
                 - If `__modify_schema__` method is used instead of `__get_pydantic_json_schema__`.
         """
-        pass
+        if from_dunder_get_core_schema:
+            schema = self._generate_schema_from_property(obj, obj)
+            if schema is not None:
+                return schema
+
+        try:
+            return self.match_type(obj)
+        except PydanticUndefinedAnnotation:
+            raise
+        except Exception as e:
+            raise PydanticSchemaGenerationError(
+                f"Unable to generate pydantic-core schema for {obj!r}"
+            ) from e
 
     def _model_schema(self, cls: type[BaseModel]) -> core_schema.CoreSchema:
         """Generate schema for a Pydantic model."""
