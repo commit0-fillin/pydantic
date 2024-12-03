@@ -15,10 +15,16 @@ if TYPE_CHECKING:
 
         @overload
         def __call__(self, schema: Dict[str, Any]) -> None:
+            """
+            Update the schema dictionary with extra information.
+            """
             pass
 
         @overload
         def __call__(self, schema: Dict[str, Any], model_class: Type[BaseModel]) -> None:
+            """
+            Update the schema dictionary with extra information, including the model class.
+            """
             pass
 else:
     SchemaExtraCallable = Callable[..., None]
