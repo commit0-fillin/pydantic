@@ -51,7 +51,15 @@ class PydanticUndefinedAnnotation(PydanticErrorMixin, NameError):
         Returns:
             Converted `PydanticUndefinedAnnotation` error.
         """
-        pass
+        error_message = str(name_error)
+        match = re.search(r"name '(\w+)' is not defined", error_message)
+        if match:
+            name = match.group(1)
+            message = f"Annotation '{name}' is not defined."
+        else:
+            name = "unknown"
+            message = f"Undefined annotation: {error_message}"
+        return cls(name=name, message=message)
 
 class PydanticImportError(PydanticErrorMixin, ImportError):
     """An error raised when an import fails due to module changes between V1 and V2.
