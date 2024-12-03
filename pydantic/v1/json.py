@@ -28,11 +28,26 @@ def decimal_encoder(dec_value: Decimal) -> Union[int, float]:
     >>> decimal_encoder(Decimal("1"))
     1
     """
-    pass
+    if dec_value.as_tuple().exponent == 0:
+        return int(dec_value)
+    else:
+        return float(dec_value)
 ENCODERS_BY_TYPE: Dict[Type[Any], Callable[[Any], Any]] = {bytes: lambda o: o.decode(), Color: str, datetime.date: isoformat, datetime.datetime: isoformat, datetime.time: isoformat, datetime.timedelta: lambda td: td.total_seconds(), Decimal: decimal_encoder, Enum: lambda o: o.value, frozenset: list, deque: list, GeneratorType: list, IPv4Address: str, IPv4Interface: str, IPv4Network: str, IPv6Address: str, IPv6Interface: str, IPv6Network: str, NameEmail: str, Path: str, Pattern: lambda o: o.pattern, SecretBytes: str, SecretStr: str, set: list, UUID: str}
 
 def timedelta_isoformat(td: datetime.timedelta) -> str:
     """
     ISO 8601 encoding for Python timedelta object.
     """
-    pass
+    total_seconds = td.total_seconds()
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    parts = []
+    if hours:
+        parts.append(f"{int(hours)}H")
+    if minutes:
+        parts.append(f"{int(minutes)}M")
+    if seconds or not parts:  # always include seconds if no other parts
+        parts.append(f"{seconds:02.3f}S".rstrip('0').rstrip('.'))
+    
+    return f"P{td.days}DT{''.join(parts)}" if td.days else f"PT{''.join(parts)}"
