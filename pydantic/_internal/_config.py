@@ -84,7 +84,22 @@ class ConfigWrapper:
         Returns:
             A `ConfigWrapper` instance for `BaseModel`.
         """
-        pass
+        config_dict = {}
+
+        # Collect config from base classes
+        for base in reversed(bases):
+            if hasattr(base, '__pydantic_config__'):
+                config_dict.update(base.__pydantic_config__.config_dict)
+
+        # Update with config from namespace
+        if 'Config' in namespace:
+            config_dict.update(namespace['Config'].__dict__)
+
+        # Update with config from kwargs
+        if 'Config' in kwargs:
+            config_dict.update(kwargs['Config'].__dict__)
+
+        return cls(config_dict)
     if not TYPE_CHECKING:
 
         def __getattr__(self, name: str) -> Any:
@@ -109,7 +124,16 @@ class ConfigWrapper:
         Returns:
             A `CoreConfig` object created from config.
         """
-        pass
+        config = {}
+
+        if 'title' not in self.config_dict and obj is not None:
+            config['title'] = obj.__name__
+
+        for key, value in self.config_dict.items():
+            if key in core_schema.CoreConfig.__annotations__:
+                config[key] = value
+
+        return core_schema.CoreConfig(**config)
 
     def __repr__(self):
         c = ', '.join((f'{k}={v!r}' for k, v in self.config_dict.items()))
@@ -131,7 +155,17 @@ def prepare_config(config: ConfigDict | dict[str, Any] | type[Any] | None) -> Co
     Returns:
         A ConfigDict object created from config.
     """
-    pass
+    if config is None:
+        return ConfigDict()
+    elif isinstance(config, dict):
+        return ConfigDict(**config)
+    elif isinstance(config, type):
+        warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
+        return ConfigDict(**{k: v for k, v in config.__dict__.items() if not k.startswith('__')})
+    elif isinstance(config, ConfigDict):
+        return config
+    else:
+        raise TypeError(f'Config must be a ConfigDict, dict, class or None, not {type(config)}')
 config_keys = set(ConfigDict.__annotations__.keys())
 V2_REMOVED_KEYS = {'allow_mutation', 'error_msg_templates', 'fields', 'getter_dict', 'smart_union', 'underscore_attrs_are_private', 'json_loads', 'json_dumps', 'copy_on_model_validation', 'post_init_call'}
 V2_RENAMED_KEYS = {'allow_population_by_field_name': 'populate_by_name', 'anystr_lower': 'str_to_lower', 'anystr_strip_whitespace': 'str_strip_whitespace', 'anystr_upper': 'str_to_upper', 'keep_untouched': 'ignored_types', 'max_anystr_length': 'str_max_length', 'min_anystr_length': 'str_min_length', 'orm_mode': 'from_attributes', 'schema_extra': 'json_schema_extra', 'validate_all': 'validate_default'}
@@ -142,4 +176,17 @@ def check_deprecated(config_dict: ConfigDict) -> None:
     Args:
         config_dict: The input config.
     """
-    pass
+    for key in config_dict:
+        if key in V2_REMOVED_KEYS:
+            warnings.warn(
+                f"Config key '{key}' has been removed in V2",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        elif key in V2_RENAMED_KEYS:
+            new_key = V2_RENAMED_KEYS[key]
+            warnings.warn(
+                f"Config key '{key}' has been renamed to '{new_key}' in V2",
+                DeprecationWarning,
+                stacklevel=2
+            )
