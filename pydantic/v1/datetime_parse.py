@@ -37,7 +37,19 @@ def parse_date(value: Union[date, StrBytesIntFloat]) -> date:
     Raise ValueError if the input is well formatted but not a valid date.
     Raise ValueError if the input isn't well formatted.
     """
-    pass
+    if isinstance(value, date):
+        return value
+    elif isinstance(value, (int, float)):
+        return (EPOCH + timedelta(seconds=int(value))).date()
+    elif isinstance(value, bytes):
+        value = value.decode()
+    
+    match = date_re.match(value)
+    if match:
+        kw = {k: int(v) for k, v in match.groupdict().items()}
+        return date(**kw)
+    else:
+        raise ValueError('invalid date format')
 
 def parse_time(value: Union[time, StrBytesIntFloat]) -> time:
     """
@@ -46,7 +58,22 @@ def parse_time(value: Union[time, StrBytesIntFloat]) -> time:
     Raise ValueError if the input is well formatted but not a valid time.
     Raise ValueError if the input isn't well formatted, in particular if it contains an offset.
     """
-    pass
+    if isinstance(value, time):
+        return value
+    elif isinstance(value, bytes):
+        value = value.decode()
+    
+    match = time_re.match(value)
+    if match:
+        kw = match.groupdict()
+        if kw['microsecond']:
+            kw['microsecond'] = kw['microsecond'].ljust(6, '0')
+        kw = {k: int(v) if v else 0 for k, v in kw.items() if k != 'tzinfo'}
+        if match.groupdict()['tzinfo']:
+            raise ValueError('offset-aware times are not supported')
+        return time(**kw)
+    else:
+        raise ValueError('invalid time format')
 
 def parse_datetime(value: Union[datetime, StrBytesIntFloat]) -> datetime:
     """
@@ -58,7 +85,33 @@ def parse_datetime(value: Union[datetime, StrBytesIntFloat]) -> datetime:
     Raise ValueError if the input is well formatted but not a valid datetime.
     Raise ValueError if the input isn't well formatted.
     """
-    pass
+    if isinstance(value, datetime):
+        return value
+    elif isinstance(value, (int, float)):
+        return EPOCH + timedelta(seconds=int(value))
+    elif isinstance(value, bytes):
+        value = value.decode()
+    
+    match = datetime_re.match(value)
+    if match:
+        kw = match.groupdict()
+        if kw['microsecond']:
+            kw['microsecond'] = kw['microsecond'].ljust(6, '0')
+        tzinfo = kw.pop('tzinfo')
+        kw = {k: int(v) if v else 0 for k, v in kw.items()}
+        if tzinfo == 'Z':
+            tzinfo = timezone.utc
+        elif tzinfo:
+            offset_mins = int(tzinfo[-2:]) if len(tzinfo) > 3 else 0
+            offset = 60 * int(tzinfo[1:3]) + offset_mins
+            if tzinfo[0] == '-':
+                offset = -offset
+            tzinfo = timezone(timedelta(minutes=offset))
+        else:
+            tzinfo = None
+        return datetime(**kw, tzinfo=tzinfo)
+    else:
+        raise ValueError('invalid datetime format')
 
 def parse_duration(value: StrBytesIntFloat) -> timedelta:
     """
@@ -68,4 +121,29 @@ def parse_duration(value: StrBytesIntFloat) -> timedelta:
 
     Also supports ISO 8601 representation.
     """
-    pass
+    if isinstance(value, timedelta):
+        return value
+    elif isinstance(value, (int, float)):
+        return timedelta(seconds=int(value))
+    elif isinstance(value, bytes):
+        value = value.decode()
+    
+    match = standard_duration_re.match(value)
+    if match:
+        kw = match.groupdict()
+        days = float(kw.pop('days') or 0)
+        sign = -1 if kw.pop('sign', '+') == '-' else 1
+        if kw.get('microseconds'):
+            kw['microseconds'] = kw['microseconds'].ljust(6, '0')
+        kw = {k: float(v) for k, v in kw.items() if v is not None}
+        return sign * timedelta(days=days, **kw)
+    
+    match = iso8601_duration_re.match(value)
+    if match:
+        kw = match.groupdict()
+        sign = -1 if kw.pop('sign') == '-' else 1
+        days = float(kw.pop('days') or 0)
+        kw = {k: float(v) for k, v in kw.items() if v is not None}
+        return sign * timedelta(days=days, **kw)
+    
+    raise ValueError('invalid duration format')
