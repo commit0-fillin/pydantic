@@ -11,7 +11,7 @@ def to_pascal(snake: str) -> str:
     Returns:
         The PascalCase string.
     """
-    pass
+    return ''.join(word.capitalize() for word in snake.split('_'))
 
 def to_camel(snake: str) -> str:
     """Convert a snake_case string to camelCase.
@@ -22,7 +22,8 @@ def to_camel(snake: str) -> str:
     Returns:
         The converted camelCase string.
     """
-    pass
+    pascal = to_pascal(snake)
+    return pascal[0].lower() + pascal[1:]
 
 def to_snake(camel: str) -> str:
     """Convert a PascalCase, camelCase, or kebab-case string to snake_case.
@@ -33,4 +34,10 @@ def to_snake(camel: str) -> str:
     Returns:
         The converted string in snake_case.
     """
-    pass
+    # Replace hyphens with underscores
+    s = camel.replace('-', '_')
+    # Insert an underscore before any uppercase letter
+    # that is preceded by a lowercase letter or number
+    s = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', s)
+    # Convert to lowercase
+    return s.lower()
