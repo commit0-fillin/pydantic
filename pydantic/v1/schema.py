@@ -220,7 +220,14 @@ def get_flat_models_from_model(model: Type['BaseModel'], known_models: Optional[
     :param known_models: used to solve circular references
     :return: a set with the initial model and all its sub-models
     """
-    pass
+    known_models = known_models or set()
+    flat_models = set()
+    if model not in known_models:
+        flat_models.add(model)
+        known_models.add(model)
+        for field in model.__fields__.values():
+            flat_models |= get_flat_models_from_field(field, known_models)
+    return flat_models
 
 def get_flat_models_from_field(field: ModelField, known_models: TypeModelSet) -> TypeModelSet:
     """
@@ -234,7 +241,14 @@ def get_flat_models_from_field(field: ModelField, known_models: TypeModelSet) ->
     :param known_models: used to solve circular references
     :return: a set with the model used in the declaration for this field, if any, and all its sub-models
     """
-    pass
+    from pydantic.v1.main import BaseModel
+    flat_models = set()
+    field_type = field.type_
+    if lenient_issubclass(field_type, BaseModel) and field_type not in known_models:
+        flat_models |= get_flat_models_from_model(field_type, known_models)
+    if field.sub_fields:
+        flat_models |= get_flat_models_from_fields(field.sub_fields, known_models)
+    return flat_models
 
 def get_flat_models_from_fields(fields: Sequence[ModelField], known_models: TypeModelSet) -> TypeModelSet:
     """
@@ -248,7 +262,10 @@ def get_flat_models_from_fields(fields: Sequence[ModelField], known_models: Type
     :param known_models: used to solve circular references
     :return: a set with any model declared in the fields, and all their sub-models
     """
-    pass
+    flat_models: TypeModelSet = set()
+    for field in fields:
+        flat_models |= get_flat_models_from_field(field, known_models)
+    return flat_models
 
 def get_flat_models_from_models(models: Sequence[Type['BaseModel']]) -> TypeModelSet:
     """
@@ -256,7 +273,10 @@ def get_flat_models_from_models(models: Sequence[Type['BaseModel']]) -> TypeMode
     a list of two models, ``Foo`` and ``Bar``, both subclasses of Pydantic ``BaseModel`` as models, and ``Bar`` has
     a field of type ``Baz`` (also subclass of ``BaseModel``), the return value will be ``set([Foo, Bar, Baz])``.
     """
-    pass
+    flat_models: TypeModelSet = set()
+    for model in models:
+        flat_models |= get_flat_models_from_model(model)
+    return flat_models
 
 def field_type_schema(field: ModelField, *, by_alias: bool, model_name_map: Dict[TypeModelOrEnum, str], ref_template: str, schema_overrides: bool=False, ref_prefix: Optional[str]=None, known_models: TypeModelSet) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
     """
