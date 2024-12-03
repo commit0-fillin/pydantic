@@ -163,12 +163,34 @@ def replace_types(type_: Any, type_map: Mapping[Any, Any]) -> Any:
     Tuple[int, Union[List[int], float]]
 
     """
-    pass
+    if isinstance(type_, TypeVar):
+        return type_map.get(type_, type_)
+    
+    origin = get_origin(type_)
+    if origin is None:
+        return type_
+    
+    args = get_args(type_)
+    if not args:
+        return type_
+    
+    new_args = tuple(replace_types(arg, type_map) for arg in args)
+    if new_args == args:
+        return type_
+    
+    return origin[new_args]
 DictValues: Type[Any] = {}.values().__class__
 
 def iter_contained_typevars(v: Any) -> Iterator[TypeVarType]:
     """Recursively iterate through all subtypes and type args of `v` and yield any typevars that are found."""
-    pass
+    if isinstance(v, TypeVar):
+        yield v
+    elif isinstance(v, (GenericAlias, _GenericAlias)):
+        for arg in get_args(v):
+            yield from iter_contained_typevars(arg)
+    elif hasattr(v, '__parameters__'):
+        for param in v.__parameters__:
+            yield from iter_contained_typevars(param)
 
 def get_caller_frame_info() -> Tuple[Optional[str], bool]:
     """
@@ -178,10 +200,36 @@ def get_caller_frame_info() -> Tuple[Optional[str], bool]:
 
     :returns Tuple[module_name, called_globally]
     """
-    pass
+    try:
+        frame = sys._getframe(2)
+    except ValueError:
+        return None, False
+    
+    module_name = frame.f_globals.get('__name__')
+    if module_name == '__main__':
+        return None, True
+    
+    caller_module = sys.modules.get(module_name)
+    return (
+        module_name,
+        caller_module is not None and frame.f_globals is caller_module.__dict__
+    )
 
 def _prepare_model_fields(created_model: Type[GenericModel], fields: Mapping[str, Any], instance_type_hints: Mapping[str, type], typevars_map: Mapping[Any, type]) -> None:
     """
     Replace DeferredType fields with concrete type hints and prepare them.
     """
-    pass
+    for name, field in fields.items():
+        if not isinstance(field, ModelField):
+            continue
+        
+        field.type_ = replace_types(field.type_, typevars_map)
+        field.prepare()
+        
+        if name in instance_type_hints:
+            field.outer_type_ = replace_types(instance_type_hints[name], typevars_map)
+        
+        if field.sub_fields:
+            _prepare_model_fields(created_model, {i: f for i, f in enumerate(field.sub_fields)}, {}, typevars_map)
+    
+    created_model.__fields__ = fields
