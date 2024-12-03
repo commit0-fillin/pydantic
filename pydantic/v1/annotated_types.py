@@ -3,6 +3,9 @@ from typing import TYPE_CHECKING, Any, Dict, FrozenSet, NamedTuple, Type
 from pydantic.v1.fields import Required
 from pydantic.v1.main import BaseModel, create_model
 from pydantic.v1.typing import is_typeddict, is_typeddict_special
+
+__all__ = ('create_model_from_typeddict', 'create_model_from_namedtuple')
+
 if TYPE_CHECKING:
     from typing_extensions import TypedDict
 if sys.version_info < (3, 11):
