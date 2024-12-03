@@ -175,11 +175,19 @@ def init_private_attributes(self: BaseModel, context: Any, /) -> None:
         self: The BaseModel instance.
         context: The context.
     """
-    pass
+    for name, private_attr in self.__private_attributes__.items():
+        default = private_attr.get_default()
+        if default is not PydanticUndefined:
+            setattr(self, name, default)
 
 def get_model_post_init(namespace: dict[str, Any], bases: tuple[type[Any], ...]) -> Callable[..., Any] | None:
     """Get the `model_post_init` method from the namespace or the class bases, or `None` if not defined."""
-    pass
+    if 'model_post_init' in namespace:
+        return namespace['model_post_init']
+    for base in bases:
+        if hasattr(base, 'model_post_init'):
+            return getattr(base, 'model_post_init')
+    return None
 
 def inspect_namespace(namespace: dict[str, Any], ignored_types: tuple[type[Any], ...], base_class_vars: set[str], base_class_fields: set[str]) -> dict[str, ModelPrivateAttr]:
     """Iterate over the namespace and:
@@ -202,7 +210,40 @@ def inspect_namespace(namespace: dict[str, Any], ignored_types: tuple[type[Any],
             - If a field does not have a type annotation.
             - If a field on base class was overridden by a non-annotated attribute.
     """
-    pass
+    private_attributes: dict[str, ModelPrivateAttr] = {}
+    annotations = namespace.get('__annotations__', {})
+
+    if '__root__' in namespace or '__root__' in annotations:
+        raise TypeError("To define root models, use `pydantic.RootModel` rather than a field called '__root__'")
+
+    for name, value in namespace.items():
+        if name in base_class_vars:
+            continue
+
+        if isinstance(value, ModelPrivateAttr):
+            if name.startswith('__') and not name.endswith('__'):
+                raise NameError(f'Private attributes must not use dunder names; use a single underscore prefix instead: {name!r}')
+            if not is_valid_privateattr_name(name):
+                raise NameError(f'Private attribute names must start with an underscore: {name!r}')
+            private_attributes[name] = value
+        elif not is_valid_field_name(name):
+            continue
+        elif name in annotations:
+            if name not in base_class_fields and isinstance(value, ignored_types):
+                continue
+        elif isinstance(value, ignored_types):
+            continue
+        elif name in base_class_fields:
+            raise PydanticUserError(
+                f'Field {name!r} defined on a base class was overridden by a non-annotated attribute. '
+                f'All fields must be annotated. '
+                f'To avoid this error, use `{name}: {type(value).__name__} = ...`',
+                code='model-field-overridden',
+            )
+        else:
+            warnings.warn(f'Field {name!r} has no type annotation', UserWarning, stacklevel=2)
+
+    return private_attributes
 
 def set_model_fields(cls: type[BaseModel], bases: tuple[type[Any], ...], config_wrapper: ConfigWrapper, types_namespace: dict[str, Any]) -> None:
     """Collect and set `cls.model_fields` and `cls.__class_vars__`.
@@ -213,7 +254,12 @@ def set_model_fields(cls: type[BaseModel], bases: tuple[type[Any], ...], config_
         config_wrapper: The config wrapper instance.
         types_namespace: Optional extra namespace to look for types in.
     """
-    pass
+    cls.model_fields, cls.__class_vars__ = collect_model_fields(
+        cls,
+        bases,
+        config_wrapper,
+        types_namespace,
+    )
 
 def complete_model_class(cls: type[BaseModel], cls_name: str, config_wrapper: ConfigWrapper, *, raise_errors: bool=True, types_namespace: dict[str, Any] | None, create_model_module: str | None=None) -> bool:
     """Finish building a model class.
@@ -236,11 +282,40 @@ def complete_model_class(cls: type[BaseModel], cls_name: str, config_wrapper: Co
         PydanticUndefinedAnnotation: If `PydanticUndefinedAnnotation` occurs in`__get_pydantic_core_schema__`
             and `raise_errors=True`.
     """
-    pass
+    try:
+        cls.__pydantic_core_schema__ = cls.__get_pydantic_core_schema__(
+            cls,
+            CallbackGetCoreSchemaHandler(
+                partial(
+                    GenerateSchema,
+                    config_wrapper,
+                    types_namespace,
+                ),
+            ),
+        )
+        cls.__pydantic_validator__ = create_schema_validator(
+            cls.__pydantic_core_schema__,
+            cls,
+            config_wrapper.config_dict,
+            cls_name=cls_name,
+        )
+        cls.__pydantic_serializer__ = SchemaSerializer(cls.__pydantic_core_schema__)
+        cls.__pydantic_complete__ = True
+        return True
+    except PydanticUndefinedAnnotation as e:
+        if raise_errors:
+            raise
+        cls.__pydantic_complete__ = False
+        return False
 
 def set_deprecated_descriptors(cls: type[BaseModel]) -> None:
     """Set data descriptors on the class for deprecated fields."""
-    pass
+    for field_name, field in cls.model_fields.items():
+        if field.deprecated:
+            msg = f'Field {field_name!r} is deprecated'
+            if isinstance(field.deprecated, str):
+                msg += f': {field.deprecated}'
+            setattr(cls, field_name, _DeprecatedFieldDescriptor(msg))
 
 class _DeprecatedFieldDescriptor:
     """Data descriptor used to emit a runtime deprecation warning before accessing a deprecated field.
@@ -310,8 +385,12 @@ def build_lenient_weakvaluedict(d: dict[str, Any] | None) -> dict[str, Any] | No
 
     The `unpack_lenient_weakvaluedict` function can be used to reverse this operation.
     """
-    pass
+    if d is None:
+        return None
+    return {k: _PydanticWeakRef(v) for k, v in d.items()}
 
 def unpack_lenient_weakvaluedict(d: dict[str, Any] | None) -> dict[str, Any] | None:
     """Inverts the transform performed by `build_lenient_weakvaluedict`."""
-    pass
+    if d is None:
+        return None
+    return {k: v() for k, v in d.items()}
