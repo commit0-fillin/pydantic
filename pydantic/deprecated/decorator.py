@@ -19,7 +19,16 @@ if TYPE_CHECKING:
 @deprecated('The `validate_arguments` method is deprecated; use `validate_call` instead.', category=None)
 def validate_arguments(func: Optional['AnyCallableT']=None, *, config: 'ConfigType'=None) -> Any:
     """Decorator to validate the arguments passed to a function."""
-    pass
+    def decorator(f: 'AnyCallableT') -> 'AnyCallableT':
+        validated_func = ValidatedFunction(f, config)
+        @wraps(f)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            return validated_func.call(*args, **kwargs)
+        return cast('AnyCallableT', wrapper)
+
+    if func:
+        return decorator(func)
+    return decorator
 ALT_V_ARGS = 'v__args'
 ALT_V_KWARGS = 'v__kwargs'
 V_POSITIONAL_ONLY_NAME = 'v__positional_only'
