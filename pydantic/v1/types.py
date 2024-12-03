@@ -464,6 +464,16 @@ class PaymentCardNumber(str):
         yield cls.validate_length_for_brand
 
     @classmethod
+    def __modify_schema__(cls, field_schema: Dict[str, Any]) -> None:
+        update_not_none(
+            field_schema,
+            type='string',
+            format='payment-card-number',
+            minLength=cls.min_length,
+            maxLength=cls.max_length
+        )
+
+    @classmethod
     def validate_digits(cls, card_number: str) -> str:
         if not card_number.isdigit():
             raise ValueError('Card number must contain only digits')
@@ -516,6 +526,10 @@ class ByteSize(int):
     @classmethod
     def __get_validators__(cls) -> 'CallableGenerator':
         yield cls.validate
+
+    @classmethod
+    def __modify_schema__(cls, field_schema: Dict[str, Any]) -> None:
+        field_schema.update(type='string', format='byte-size', example='5MB')
 if TYPE_CHECKING:
     PastDate = date
     FutureDate = date
