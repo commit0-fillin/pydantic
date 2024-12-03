@@ -62,7 +62,15 @@ def expand_grouped_metadata(annotations: Iterable[Any]) -> Iterable[Any]:
         #> [Ge(ge=4), MinLen(min_length=5)]
         ```
     """
-    pass
+    from annotated_types import BaseMetadata, GroupedMetadata
+
+    for annotation in annotations:
+        if isinstance(annotation, GroupedMetadata):
+            yield from expand_grouped_metadata(annotation.metadata)
+        elif isinstance(annotation, BaseMetadata):
+            yield annotation
+        else:
+            yield annotation
 
 @lru_cache
 def _get_at_to_constraint_map() -> dict[type, str]:
@@ -73,7 +81,17 @@ def _get_at_to_constraint_map() -> dict[type, str]:
     the import time of `pydantic`. We still only want to have this dictionary defined in one place,
     so we use this function to cache the result.
     """
-    pass
+    import annotated_types as at
+    return {
+        at.Gt: 'gt',
+        at.Ge: 'ge',
+        at.Lt: 'lt',
+        at.Le: 'le',
+        at.MultipleOf: 'multiple_of',
+        at.MinLen: 'min_length',
+        at.MaxLen: 'max_length',
+        at.Predicate: 'predicate',
+    }
 
 def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema | None:
     """Apply `annotation` to `schema` if it is an annotation we know about (Gt, Le, etc.).
@@ -94,7 +112,28 @@ def apply_known_metadata(annotation: Any, schema: CoreSchema) -> CoreSchema | No
     Raises:
         PydanticCustomError: If `Predicate` fails.
     """
-    pass
+    from annotated_types import BaseMetadata, Predicate
+
+    at_to_constraint = _get_at_to_constraint_map()
+    constraint = at_to_constraint.get(type(annotation))
+
+    if constraint is None:
+        return None
+
+    if isinstance(annotation, Predicate):
+        def predicate_validator(v: Any) -> Any:
+            if not annotation.func(v):
+                raise PydanticCustomError('predicate_failed', 'Predicate failed')
+            return v
+        return core_schema.no_info_wrap_validator_function(
+            predicate_validator,
+            schema,
+            schema_type=schema['type']
+        )
+
+    new_schema = schema.copy()
+    new_schema[constraint] = getattr(annotation, constraint)
+    return new_schema
 
 def collect_known_metadata(annotations: Iterable[Any]) -> tuple[dict[str, Any], list[Any]]:
     """Split `annotations` into known metadata and unknown annotations.
@@ -115,7 +154,18 @@ def collect_known_metadata(annotations: Iterable[Any]) -> tuple[dict[str, Any], 
         #> ({'gt': 1, 'min_length': 42}, [Ellipsis])
         ```
     """
-    pass
+    known_metadata = {}
+    unknown_annotations = []
+    at_to_constraint = _get_at_to_constraint_map()
+
+    for annotation in expand_grouped_metadata(annotations):
+        constraint = at_to_constraint.get(type(annotation))
+        if constraint is not None:
+            known_metadata[constraint] = getattr(annotation, constraint)
+        else:
+            unknown_annotations.append(annotation)
+
+    return known_metadata, unknown_annotations
 
 def check_metadata(metadata: dict[str, Any], allowed: Iterable[str], source_type: Any) -> None:
     """A small utility function to validate that the given metadata can be applied to the target.
@@ -129,4 +179,10 @@ def check_metadata(metadata: dict[str, Any], allowed: Iterable[str], source_type
     Raises:
         TypeError: If there is metadatas that can't be applied on source type.
     """
-    pass
+    allowed_set = set(allowed)
+    invalid = set(metadata) - allowed_set
+    if invalid:
+        raise TypeError(
+            f"The following constraints cannot be applied to {source_type}: {', '.join(invalid)}. "
+            f"Allowed constraints are: {', '.join(allowed_set)}"
+        )
