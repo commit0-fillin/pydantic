@@ -283,7 +283,33 @@ def field_validator(field: str, /, *fields: str, mode: FieldValidatorModes='afte
             - If the args passed to `@field_validator` as fields are not strings.
             - If `@field_validator` applied to instance methods.
     """
-    pass
+    if not isinstance(field, str):
+        raise PydanticUserError(
+            '`@field_validator` must be called with at least one field name argument',
+            code='validator-no-fields',
+        )
+    for f in fields:
+        if not isinstance(f, str):
+            raise PydanticUserError(
+                f'`@field_validator` arguments must be strings',
+                code='validator-invalid-fields',
+            )
+
+    def dec(f: Any) -> Any:
+        if is_instance_method_from_sig(f):
+            raise PydanticUserError(
+                '`@field_validator` cannot be applied to instance methods',
+                code='validator-instance-method',
+            )
+
+        decorator_info = FieldValidatorDecoratorInfo(
+            fields=(field,) + fields,
+            mode=mode,
+            check_fields=check_fields,
+        )
+        return PydanticDescriptorProxy(f, decorator_info)
+
+    return dec
 _ModelType = TypeVar('_ModelType')
 _ModelTypeCo = TypeVar('_ModelTypeCo', covariant=True)
 
@@ -386,7 +412,11 @@ def model_validator(*, mode: Literal['wrap', 'before', 'after']) -> Any:
     Returns:
         A decorator that can be used to decorate a function to be used as a model validator.
     """
-    pass
+    def dec(f: Any) -> Any:
+        decorator_info = ModelValidatorDecoratorInfo(mode=mode)
+        return PydanticDescriptorProxy(f, decorator_info)
+
+    return dec
 AnyType = TypeVar('AnyType')
 if TYPE_CHECKING:
     InstanceOf = Annotated[AnyType, ...]
