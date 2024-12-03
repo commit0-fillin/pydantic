@@ -12,18 +12,27 @@ if TYPE_CHECKING:
     AnyCallableT = TypeVar('AnyCallableT', bound=AnyCallable)
     ConfigType = Union[None, Type[Any], Dict[str, Any]]
 
-def validate_arguments(func: Optional['AnyCallableT']=None, *, config: 'ConfigType'=None) -> Any:
+def validate_arguments(func: Optional['AnyCallableT'] = None, *, config: 'ConfigType' = None) -> Any:
     """
     Decorator to validate the arguments passed to a function.
     """
-    pass
+    def decorator(f: 'AnyCallableT') -> 'AnyCallableT':
+        validated_func = ValidatedFunction(f, config)
+        @wraps(f)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            return validated_func.call(*args, **kwargs)
+        wrapper.__validated_function__ = validated_func  # type: ignore
+        return cast('AnyCallableT', wrapper)
+
+    if func:
+        return decorator(func)
+    return decorator
 ALT_V_ARGS = 'v__args'
 ALT_V_KWARGS = 'v__kwargs'
 V_POSITIONAL_ONLY_NAME = 'v__positional_only'
 V_DUPLICATE_KWARGS = 'v__duplicate_kwargs'
 
 class ValidatedFunction:
-
     def __init__(self, function: 'AnyCallableT', config: 'ConfigType'):
         from inspect import Parameter, signature
         parameters: Mapping[str, Parameter] = signature(function).parameters
@@ -73,3 +82,59 @@ class ValidatedFunction:
         if not takes_kwargs:
             fields[self.v_kwargs_name] = (Dict[Any, Any], None)
         self.create_model(fields, takes_args, takes_kwargs, config)
+
+    def create_model(self, fields: Dict[str, Tuple[Any, Any]], takes_args: bool, takes_kwargs: bool, config: 'ConfigType'):
+        validators = {field_name: make_generic_validator(field_name) for field_name in fields}
+        
+        model_name = f'{self.raw_function.__name__}Model'
+        model_module = self.raw_function.__module__
+        
+        self.model = create_model(
+            model_name,
+            __module__=model_module,
+            __config__=prepare_config(config),
+            __validators__=validators,
+            **fields
+        )
+
+    def call(self, *args: Any, **kwargs: Any) -> Any:
+        values = self.build_values(args, kwargs)
+        m = self.model(**values)
+        return self.execute(m)
+
+    def build_values(self, args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Dict[str, Any]:
+        values: Dict[str, Any] = {}
+        v_args = []
+        for i, arg in enumerate(args):
+            name = self.arg_mapping.get(i)
+            if name:
+                values[name] = arg
+            else:
+                v_args.append(arg)
+        values[self.v_args_name] = tuple(v_args)
+        
+        duplicate_kwargs = []
+        for k, v in kwargs.items():
+            if k in values:
+                duplicate_kwargs.append(k)
+            else:
+                values[k] = v
+        values[self.v_kwargs_name] = kwargs
+        values[V_DUPLICATE_KWARGS] = duplicate_kwargs
+        return values
+
+    def execute(self, m: BaseModel) -> Any:
+        d = dict(m)
+        var_kwargs = d.pop(self.v_kwargs_name, {})
+        var_args = d.pop(self.v_args_name, ())
+        d.pop(V_POSITIONAL_ONLY_NAME, None)
+        d.pop(V_DUPLICATE_KWARGS, None)
+        return self.raw_function(*var_args, **{**d, **var_kwargs})
+
+def make_generic_validator(field_name: str) -> classmethod:
+    @classmethod
+    def generic_validator(cls, v: Any, values: Dict[str, Any], **kwargs: Any) -> Any:
+        if field_name in {V_POSITIONAL_ONLY_NAME, V_DUPLICATE_KWARGS}:
+            return v
+        return v
+    return generic_validator
