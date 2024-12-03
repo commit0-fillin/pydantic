@@ -71,7 +71,21 @@ def validator(__field: str, *fields: str, pre: bool=False, each_item: bool=False
         Callable: A decorator that can be used to decorate a
             function to be used as a validator.
     """
-    pass
+    if allow_reuse:
+        warn(_ALLOW_REUSE_WARNING_MESSAGE, DeprecationWarning, stacklevel=2)
+
+    all_fields = (__field,) + fields
+    def dec(_func: _V1ValidatorType) -> _V1ValidatorType:
+        _func.__validator_config__ = ValidatorDecoratorInfo(  # type: ignore
+            fields=all_fields,
+            mode='before' if pre else 'after',
+            each_item=each_item,
+            always=always,
+            check_fields=check_fields,
+        )
+        return _func
+
+    return dec
 
 @deprecated('Pydantic V1 style `@root_validator` validators are deprecated. You should migrate to Pydantic V2 style `@model_validator` validators, see the migration guide for more details', category=None)
 def root_validator(*__args, pre: bool=False, skip_on_failure: bool=False, allow_reuse: bool=False) -> Any:
@@ -89,4 +103,20 @@ def root_validator(*__args, pre: bool=False, skip_on_failure: bool=False, allow_
     Returns:
         Any: A decorator that can be used to decorate a function to be used as a root_validator.
     """
-    pass
+    if allow_reuse:
+        warn(_ALLOW_REUSE_WARNING_MESSAGE, DeprecationWarning, stacklevel=2)
+
+    if __args and callable(__args[0]):
+        func = __args[0]
+        func.__root_validator_config__ = RootValidatorDecoratorInfo(  # type: ignore
+            mode='before' if pre else 'after'
+        )
+        return func
+
+    def dec(_func: Any) -> Any:
+        _func.__root_validator_config__ = RootValidatorDecoratorInfo(  # type: ignore
+            mode='before' if pre else 'after'
+        )
+        return _func
+
+    return dec
