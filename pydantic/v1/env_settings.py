@@ -101,7 +101,11 @@ class EnvSettingsSource:
         """
         Find out if a field is complex, and if so whether JSON errors should be ignored
         """
-        pass
+        if field.is_complex():
+            if isinstance(field.type_, type) and issubclass(field.type_, BaseSettings):
+                return True, True
+            return True, False
+        return False, False
 
     def explode_env_vars(self, field: ModelField, env_vars: Mapping[str, Optional[str]]) -> Dict[str, Any]:
         """
@@ -109,7 +113,22 @@ class EnvSettingsSource:
 
         This is applied to a single field, hence filtering by env_var prefix.
         """
-        pass
+        prefixes = [f'{name}_' for name in field.field_info.extra['env_names']]
+        result: Dict[str, Any] = {}
+        for env_name, env_val in env_vars.items():
+            if any(env_name.startswith(prefix) for prefix in prefixes):
+                if self.env_nested_delimiter:
+                    env_name = env_name[len(next(prefix for prefix in prefixes if env_name.startswith(prefix))):]
+                    keys = env_name.split(self.env_nested_delimiter)
+                    tmp = result
+                    for key in keys[:-1]:
+                        if key not in tmp:
+                            tmp[key] = {}
+                        tmp = tmp[key]
+                    tmp[keys[-1]] = env_val
+                else:
+                    result[env_name] = env_val
+        return result
 
     def __repr__(self) -> str:
         return f'EnvSettingsSource(env_file={self.env_file!r}, env_file_encoding={self.env_file_encoding!r}, env_nested_delimiter={self.env_nested_delimiter!r})'
@@ -157,4 +176,11 @@ def find_case_path(dir_path: Path, file_name: str, case_sensitive: bool) -> Opti
     """
     Find a file within path's directory matching filename, optionally ignoring case.
     """
-    pass
+    if case_sensitive:
+        path = dir_path / file_name
+        return path if path.exists() else None
+    else:
+        for path in dir_path.iterdir():
+            if path.name.lower() == file_name.lower():
+                return path
+    return None
