@@ -190,7 +190,9 @@ class Decorator(Generic[DecoratorInfoType]):
         Returns:
             The new decorator instance.
         """
-        pass
+        cls_ref = get_type_ref(cls_)
+        func = get_attribute_from_base_dicts(cls_, cls_var_name)
+        return Decorator(cls_ref=cls_ref, cls_var_name=cls_var_name, func=func, shim=shim, info=info)
 
     def bind_to_cls(self, cls: Any) -> Decorator[DecoratorInfoType]:
         """Bind the decorator to a class.
@@ -201,7 +203,9 @@ class Decorator(Generic[DecoratorInfoType]):
         Returns:
             The new decorator instance.
         """
-        pass
+        cls_ref = get_type_ref(cls)
+        func = get_attribute_from_base_dicts(cls, self.cls_var_name)
+        return Decorator(cls_ref=cls_ref, cls_var_name=self.cls_var_name, func=func, shim=self.shim, info=self.info)
 
 def get_bases(tp: type[Any]) -> tuple[type[Any], ...]:
     """Get the base classes of a class or typeddict.
@@ -212,14 +216,25 @@ def get_bases(tp: type[Any]) -> tuple[type[Any], ...]:
     Returns:
         The base classes.
     """
-    pass
+    if is_typeddict(tp):
+        return tp.__orig_bases__
+    return tp.__bases__
 
 def mro(tp: type[Any]) -> tuple[type[Any], ...]:
     """Calculate the Method Resolution Order of bases using the C3 algorithm.
 
     See https://www.python.org/download/releases/2.3/mro/
     """
-    pass
+    if hasattr(tp, '__mro__'):
+        return tp.__mro__
+    else:
+        # Simulate MRO for TypedDict which doesn't have a real MRO
+        result = [tp]
+        for base in get_bases(tp):
+            for cls in mro(base):
+                if cls not in result:
+                    result.append(cls)
+        return tuple(result)
 _sentinel = object()
 
 def get_attribute_from_bases(tp: type[Any] | tuple[type[Any], ...], name: str) -> Any:
@@ -241,7 +256,15 @@ def get_attribute_from_bases(tp: type[Any] | tuple[type[Any], ...], name: str) -
     Raises:
         AttributeError: If the attribute is not found in any class in the MRO.
     """
-    pass
+    if isinstance(tp, tuple):
+        classes = tp
+    else:
+        classes = mro(tp)
+
+    for cls in classes:
+        if name in cls.__dict__:
+            return cls.__dict__[name]
+    raise AttributeError(f"{tp} has no attribute '{name}'")
 
 def get_attribute_from_base_dicts(tp: type[Any], name: str) -> Any:
     """Get an attribute out of the `__dict__` following the MRO.
@@ -258,7 +281,12 @@ def get_attribute_from_base_dicts(tp: type[Any], name: str) -> Any:
     Raises:
         KeyError: If the attribute is not found in any class's `__dict__` in the MRO.
     """
-    pass
+    for cls in mro(tp):
+        try:
+            return cls.__dict__[name]
+        except KeyError:
+            pass
+    raise KeyError(f"{tp} has no attribute '{name}' in its __dict__ or its bases")
 
 @dataclass(**slots_true)
 class DecoratorInfos:
@@ -289,7 +317,26 @@ class DecoratorInfos:
         If we do replace any functions we put the replacement into the position
         the replaced function was in; that is, we maintain the order.
         """
-        pass
+        decorator_infos = DecoratorInfos()
+        for base in reversed(mro(model_dc)):
+            for name, value in base.__dict__.items():
+                if isinstance(value, PydanticDescriptorProxy):
+                    info = value.decorator_info
+                    if isinstance(info, ValidatorDecoratorInfo):
+                        decorator_infos.validators[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+                    elif isinstance(info, FieldValidatorDecoratorInfo):
+                        decorator_infos.field_validators[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+                    elif isinstance(info, RootValidatorDecoratorInfo):
+                        decorator_infos.root_validators[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+                    elif isinstance(info, FieldSerializerDecoratorInfo):
+                        decorator_infos.field_serializers[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+                    elif isinstance(info, ModelSerializerDecoratorInfo):
+                        decorator_infos.model_serializers[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+                    elif isinstance(info, ModelValidatorDecoratorInfo):
+                        decorator_infos.model_validators[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+                    elif isinstance(info, ComputedFieldInfo):
+                        decorator_infos.computed_fields[name] = Decorator.build(base, cls_var_name=name, shim=value.shim, info=info)
+        return decorator_infos
 
 def inspect_validator(validator: Callable[..., Any], mode: FieldValidatorModes) -> bool:
     """Look at a field or model validator function and determine whether it takes an info argument.
@@ -303,7 +350,25 @@ def inspect_validator(validator: Callable[..., Any], mode: FieldValidatorModes) 
     Returns:
         Whether the validator takes an info argument.
     """
-    pass
+    sig = signature(validator)
+    params = list(sig.parameters.values())
+    
+    if mode == 'before':
+        if len(params) == 1:
+            return False
+        elif len(params) == 2 and params[1].name == 'info':
+            return True
+        else:
+            raise PydanticUserError(f"'before' validators should have one or two arguments, got {len(params)}")
+    elif mode == 'after':
+        if len(params) == 2:
+            return False
+        elif len(params) == 3 and params[2].name == 'info':
+            return True
+        else:
+            raise PydanticUserError(f"'after' validators should have two or three arguments, got {len(params)}")
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
 
 def inspect_field_serializer(serializer: Callable[..., Any], mode: Literal['plain', 'wrap'], computed_field: bool=False) -> tuple[bool, bool]:
     """Look at a field serializer function and determine if it is a field serializer,
@@ -320,7 +385,27 @@ def inspect_field_serializer(serializer: Callable[..., Any], mode: Literal['plai
     Returns:
         Tuple of (is_field_serializer, info_arg).
     """
-    pass
+    sig = signature(serializer)
+    params = list(sig.parameters.values())
+
+    if mode == 'plain':
+        if len(params) == 1:
+            return True, False
+        elif len(params) == 2 and params[1].name == 'info':
+            return True, True
+        elif computed_field and len(params) == 0:
+            return True, False
+        else:
+            raise PydanticUserError(f"'plain' serializers should have one or two arguments, got {len(params)}")
+    elif mode == 'wrap':
+        if len(params) == 2:
+            return True, False
+        elif len(params) == 3 and params[2].name == 'info':
+            return True, True
+        else:
+            raise PydanticUserError(f"'wrap' serializers should have two or three arguments, got {len(params)}")
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
 
 def inspect_annotated_serializer(serializer: Callable[..., Any], mode: Literal['plain', 'wrap']) -> bool:
     """Look at a serializer function used via `Annotated` and determine whether it takes an info argument.
@@ -334,7 +419,25 @@ def inspect_annotated_serializer(serializer: Callable[..., Any], mode: Literal['
     Returns:
         info_arg
     """
-    pass
+    sig = signature(serializer)
+    params = list(sig.parameters.values())
+
+    if mode == 'plain':
+        if len(params) == 1:
+            return False
+        elif len(params) == 2 and params[1].name == 'info':
+            return True
+        else:
+            raise PydanticUserError(f"'plain' serializers should have one or two arguments, got {len(params)}")
+    elif mode == 'wrap':
+        if len(params) == 2:
+            return False
+        elif len(params) == 3 and params[2].name == 'info':
+            return True
+        else:
+            raise PydanticUserError(f"'wrap' serializers should have two or three arguments, got {len(params)}")
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
 
 def inspect_model_serializer(serializer: Callable[..., Any], mode: Literal['plain', 'wrap']) -> bool:
     """Look at a model serializer function and determine whether it takes an info argument.
@@ -348,7 +451,25 @@ def inspect_model_serializer(serializer: Callable[..., Any], mode: Literal['plai
     Returns:
         `info_arg` - whether the function expects an info argument.
     """
-    pass
+    sig = signature(serializer)
+    params = list(sig.parameters.values())
+
+    if mode == 'plain':
+        if len(params) == 1:
+            return False
+        elif len(params) == 2 and params[1].name == 'info':
+            return True
+        else:
+            raise PydanticUserError(f"'plain' model serializers should have one or two arguments, got {len(params)}")
+    elif mode == 'wrap':
+        if len(params) == 2:
+            return False
+        elif len(params) == 3 and params[2].name == 'info':
+            return True
+        else:
+            raise PydanticUserError(f"'wrap' model serializers should have two or three arguments, got {len(params)}")
+    else:
+        raise ValueError(f"Invalid mode: {mode}")
 AnyDecoratorCallable: TypeAlias = 'Union[classmethod[Any, Any, Any], staticmethod[Any, Any], partialmethod[Any], Callable[..., Any]]'
 
 def is_instance_method_from_sig(function: AnyDecoratorCallable) -> bool:
@@ -363,7 +484,9 @@ def is_instance_method_from_sig(function: AnyDecoratorCallable) -> bool:
     Returns:
         `True` if the function is an instance method, `False` otherwise.
     """
-    pass
+    sig = signature(unwrap_wrapped_function(function))
+    params = list(sig.parameters.values())
+    return params and params[0].name == 'self'
 
 def ensure_classmethod_based_on_signature(function: AnyDecoratorCallable) -> Any:
     """Apply the `@classmethod` decorator on the function.
@@ -374,7 +497,12 @@ def ensure_classmethod_based_on_signature(function: AnyDecoratorCallable) -> Any
     Return:
         The `@classmethod` decorator applied function.
     """
-    pass
+    if isinstance(function, (classmethod, staticmethod)):
+        return function
+    elif is_instance_method_from_sig(function):
+        return function
+    else:
+        return classmethod(function)
 
 def unwrap_wrapped_function(func: Any, *, unwrap_partial: bool=True, unwrap_class_static_method: bool=True) -> Any:
     """Recursively unwraps a wrapped function until the underlying function is reached.
@@ -389,7 +517,17 @@ def unwrap_wrapped_function(func: Any, *, unwrap_partial: bool=True, unwrap_clas
     Returns:
         The underlying function of the wrapped function.
     """
-    pass
+    while True:
+        if isinstance(func, property):
+            func = func.fget
+        elif unwrap_partial and isinstance(func, (partial, partialmethod)):
+            func = func.func
+        elif unwrap_class_static_method and isinstance(func, (classmethod, staticmethod)):
+            func = func.__func__
+        elif hasattr(func, '__wrapped__'):
+            func = func.__wrapped__
+        else:
+            return func
 
 def get_function_return_type(func: Any, explicit_return_type: Any, types_namespace: dict[str, Any] | None=None) -> Any:
     """Get the function return type.
@@ -405,7 +543,12 @@ def get_function_return_type(func: Any, explicit_return_type: Any, types_namespa
     Returns:
         The function return type.
     """
-    pass
+    if explicit_return_type is not None:
+        return explicit_return_type
+
+    func = unwrap_wrapped_function(func)
+    type_hints = get_function_type_hints(func, types_namespace=types_namespace)
+    return type_hints.get('return', Any)
 
 def count_positional_required_params(sig: Signature) -> int:
     """Get the number of positional (required) arguments of a signature.
@@ -417,7 +560,13 @@ def count_positional_required_params(sig: Signature) -> int:
     Returns:
         The number of positional arguments of a signature.
     """
-    pass
+    count = 0
+    for i, param in enumerate(sig.parameters.values()):
+        if i == 0 or (param.default is Parameter.empty and param.kind in {Parameter.POSITIONAL_ONLY, Parameter.POSITIONAL_OR_KEYWORD}):
+            count += 1
+        else:
+            break
+    return count
 
 def ensure_property(f: Any) -> Any:
     """Ensure that a function is a `property` or `cached_property`, or is a valid descriptor.
@@ -428,4 +577,7 @@ def ensure_property(f: Any) -> Any:
     Returns:
         The function, or a `property` or `cached_property` instance wrapping the function.
     """
-    pass
+    if isinstance(f, (property, cached_property)) or isdatadescriptor(f) or ismethoddescriptor(f):
+        return f
+    else:
+        return property(f)
