@@ -43,21 +43,68 @@ def validator(*fields: str, pre: bool=False, each_item: bool=False, always: bool
     :param check_fields: whether to check that the fields actually exist on the model
     :param allow_reuse: whether to track and raise an error if another validator refers to the decorated function
     """
-    pass
+    if whole is not None:
+        warnings.warn('The "whole" keyword argument is deprecated, use "each_item" instead', DeprecationWarning)
+        each_item = not whole
+
+    def decorator(f: AnyCallable) -> 'AnyClassMethod':
+        f_cls = _prepare_validator(f, allow_reuse)
+
+        config = {
+            'pre': pre,
+            'each_item': each_item,
+            'always': always,
+            'check_fields': check_fields,
+        }
+
+        setattr(f_cls, VALIDATOR_CONFIG_KEY, config)
+        setattr(f_cls, 'validate', classmethod(f_cls.__func__))
+        setattr(f_cls, '__fields__', fields)
+
+        return f_cls
+
+    return decorator
 
 def root_validator(_func: Optional[AnyCallable]=None, *, pre: bool=False, allow_reuse: bool=False, skip_on_failure: bool=False) -> Union['AnyClassMethod', Callable[[AnyCallable], 'AnyClassMethod']]:
     """
     Decorate methods on a model indicating that they should be used to validate (and perhaps modify) data either
     before or after standard model parsing/validation is performed.
     """
-    pass
+    def decorator(f: AnyCallable) -> 'AnyClassMethod':
+        f_cls = _prepare_validator(f, allow_reuse)
+
+        config = {
+            'pre': pre,
+            'skip_on_failure': skip_on_failure,
+        }
+
+        setattr(f_cls, ROOT_VALIDATOR_CONFIG_KEY, config)
+        setattr(f_cls, 'validate', classmethod(f_cls.__func__))
+        setattr(f_cls, '__fields__', ())
+
+        return f_cls
+
+    if _func is None:
+        return decorator
+    else:
+        return decorator(_func)
 
 def _prepare_validator(function: AnyCallable, allow_reuse: bool) -> 'AnyClassMethod':
     """
     Avoid validators with duplicated names since without this, validators can be overwritten silently
     which generally isn't the intended behaviour, don't run in ipython (see #312) or if allow_reuse is False.
     """
-    pass
+    if not allow_reuse and not in_ipython():
+        function_name = function.__name__
+        if function_name in _FUNCS:
+            raise ConfigError(f'duplicate validator function "{function_name}"')
+        _FUNCS.add(function_name)
+
+    @wraps(function)
+    def f_cls(cls, v, values, **kwargs):
+        return function(v, values=values, **kwargs)
+
+    return f_cls
 
 class ValidatorGroup:
 
@@ -75,5 +122,32 @@ def make_generic_validator(validator: AnyCallable) -> 'ValidatorCallable':
     It's done like this so validators don't all need **kwargs in their signature, eg. any combination of
     the arguments "values", "fields" and/or "config" are permitted.
     """
-    pass
+    signature = Signature.from_callable(validator)
+    param_names = tuple(signature.parameters.keys())
+    if param_names == ('cls', 'v'):
+        return validator
+    elif param_names == ('cls', 'v', 'values'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, values)
+    elif param_names == ('cls', 'v', 'field'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, field)
+    elif param_names == ('cls', 'v', 'config'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, config)
+    elif param_names == ('cls', 'v', 'values', 'field'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, values, field)
+    elif param_names == ('cls', 'v', 'values', 'config'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, values, config)
+    elif param_names == ('cls', 'v', 'field', 'config'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, field, config)
+    elif param_names == ('cls', 'v', 'values', 'field', 'config'):
+        def f(cls: Any, v: Any, values: Dict[str, Any], field: 'ModelField', config: Type['BaseConfig']) -> Any:
+            return validator(cls, v, values, field, config)
+    else:
+        raise ConfigError(f'Invalid signature for validator {validator}: {signature}')
+    return f
 all_kwargs = {'values', 'field', 'config'}
