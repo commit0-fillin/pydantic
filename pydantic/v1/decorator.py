@@ -1,11 +1,10 @@
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple, Type, TypeVar, Union, overload
-from pydantic.v1 import validator
-from pydantic.v1.config import Extra
-from pydantic.v1.errors import ConfigError
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Mapping, Optional, Tuple, Type, TypeVar, Union, cast, overload
+from typing_extensions import Literal, Protocol
+from pydantic.v1.typing import AnyCallable
 from pydantic.v1.main import BaseModel, create_model
-from pydantic.v1.typing import get_all_type_hints
-from pydantic.v1.utils import to_camel
+from pydantic.v1.config import prepare_config
+from functools import wraps
 __all__ = ('validate_arguments',)
 if TYPE_CHECKING:
     from pydantic.v1.typing import AnyCallable
