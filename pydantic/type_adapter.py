@@ -68,11 +68,15 @@ def _get_schema(type_: Any, config_wrapper: _config.ConfigWrapper, parent_depth:
 
 def _getattr_no_parents(obj: Any, attribute: str) -> Any:
     """Returns the attribute value without attempting to look up attributes from parent types."""
-    pass
+    if hasattr(obj, '__dict__'):
+        return obj.__dict__.get(attribute)
+    return getattr(obj, attribute)
 
 def _type_has_config(type_: Any) -> bool:
     """Returns whether the type has config."""
-    pass
+    return hasattr(type_, '__pydantic_config__') or (
+        hasattr(type_, '__pydantic_model_config__') and not isinstance(getattr(type_, '__pydantic_model_config__', None), property)
+    )
 
 @final
 class TypeAdapter(Generic[T]):
@@ -161,19 +165,38 @@ class TypeAdapter(Generic[T]):
     @_frame_depth(2)
     def core_schema(self) -> CoreSchema:
         """The pydantic-core schema used to build the SchemaValidator and SchemaSerializer."""
-        pass
+        if self._core_schema is None:
+            config_wrapper = _config.ConfigWrapper(self._config, check=False)
+            self._core_schema = self._get_schema(self._type, config_wrapper, self._parent_depth)
+        return self._core_schema
 
     @cached_property
     @_frame_depth(2)
     def validator(self) -> SchemaValidator | PluggableSchemaValidator:
         """The pydantic-core SchemaValidator used to validate instances of the model."""
-        pass
+        if self._validator is None:
+            config_wrapper = _config.ConfigWrapper(self._config, check=False)
+            core_config = config_wrapper.core_config(None)
+            self._validator = create_schema_validator(
+                self.core_schema,
+                self._type,
+                self._module_name,
+                str(self._type),
+                'TypeAdapter',
+                core_config,
+                config_wrapper.plugin_settings,
+            )
+        return self._validator
 
     @cached_property
     @_frame_depth(2)
     def serializer(self) -> SchemaSerializer:
         """The pydantic-core SchemaSerializer used to dump instances of the model."""
-        pass
+        if self._serializer is None:
+            config_wrapper = _config.ConfigWrapper(self._config, check=False)
+            core_config = config_wrapper.core_config(None)
+            self._serializer = SchemaSerializer(self.core_schema, core_config)
+        return self._serializer
 
     @_frame_depth(1)
     def validate_python(self, object: Any, /, *, strict: bool | None=None, from_attributes: bool | None=None, context: dict[str, Any] | None=None) -> T:
@@ -192,7 +215,7 @@ class TypeAdapter(Generic[T]):
         Returns:
             The validated object.
         """
-        pass
+        return self.validator.validate_python(object, strict=strict, from_attributes=from_attributes, context=context)
 
     @_frame_depth(1)
     def validate_json(self, data: str | bytes, /, *, strict: bool | None=None, context: dict[str, Any] | None=None) -> T:
@@ -208,7 +231,7 @@ class TypeAdapter(Generic[T]):
         Returns:
             The validated object.
         """
-        pass
+        return self.validator.validate_json(data, strict=strict, context=context)
 
     @_frame_depth(1)
     def validate_strings(self, obj: Any, /, *, strict: bool | None=None, context: dict[str, Any] | None=None) -> T:
@@ -222,7 +245,7 @@ class TypeAdapter(Generic[T]):
         Returns:
             The validated object.
         """
-        pass
+        return self.validator.validate_strings(obj, strict=strict, context=context)
 
     @_frame_depth(1)
     def get_default_value(self, *, strict: bool | None=None, context: dict[str, Any] | None=None) -> Some[T] | None:
@@ -235,7 +258,7 @@ class TypeAdapter(Generic[T]):
         Returns:
             The default value wrapped in a `Some` if there is one or None if not.
         """
-        pass
+        return self.validator.get_default_value(strict=strict, context=context)
 
     @_frame_depth(1)
     def dump_python(self, instance: T, /, *, mode: Literal['json', 'python']='python', include: IncEx | None=None, exclude: IncEx | None=None, by_alias: bool=False, exclude_unset: bool=False, exclude_defaults: bool=False, exclude_none: bool=False, round_trip: bool=False, warnings: bool | Literal['none', 'warn', 'error']=True, serialize_as_any: bool=False, context: dict[str, Any] | None=None) -> Any:
@@ -259,7 +282,20 @@ class TypeAdapter(Generic[T]):
         Returns:
             The serialized object.
         """
-        pass
+        return self.serializer.to_python(
+            instance,
+            mode=mode,
+            include=include,
+            exclude=exclude,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            round_trip=round_trip,
+            warnings=warnings,
+            serialize_as_any=serialize_as_any,
+            context=context,
+        )
 
     @_frame_depth(1)
     def dump_json(self, instance: T, /, *, indent: int | None=None, include: IncEx | None=None, exclude: IncEx | None=None, by_alias: bool=False, exclude_unset: bool=False, exclude_defaults: bool=False, exclude_none: bool=False, round_trip: bool=False, warnings: bool | Literal['none', 'warn', 'error']=True, serialize_as_any: bool=False, context: dict[str, Any] | None=None) -> bytes:
@@ -285,7 +321,20 @@ class TypeAdapter(Generic[T]):
         Returns:
             The JSON representation of the given instance as bytes.
         """
-        pass
+        return self.serializer.to_json(
+            instance,
+            indent=indent,
+            include=include,
+            exclude=exclude,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            round_trip=round_trip,
+            warnings=warnings,
+            serialize_as_any=serialize_as_any,
+            context=context,
+        )
 
     @_frame_depth(1)
     def json_schema(self, *, by_alias: bool=True, ref_template: str=DEFAULT_REF_TEMPLATE, schema_generator: type[GenerateJsonSchema]=GenerateJsonSchema, mode: JsonSchemaMode='validation') -> dict[str, Any]:
@@ -300,7 +349,7 @@ class TypeAdapter(Generic[T]):
         Returns:
             The JSON schema for the model as a dictionary.
         """
-        pass
+        return schema_generator(by_alias=by_alias, ref_template=ref_template).generate(self.core_schema, mode=mode)
 
     @staticmethod
     def json_schemas(inputs: Iterable[tuple[JsonSchemaKeyT, JsonSchemaMode, TypeAdapter[Any]]], /, *, by_alias: bool=True, title: str | None=None, description: str | None=None, ref_template: str=DEFAULT_REF_TEMPLATE, schema_generator: type[GenerateJsonSchema]=GenerateJsonSchema) -> tuple[dict[tuple[JsonSchemaKeyT, JsonSchemaMode], JsonSchemaValue], JsonSchemaValue]:
