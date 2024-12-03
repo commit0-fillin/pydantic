@@ -43,7 +43,15 @@ class GenerateJsonSchemaHandler(GetJsonSchemaHandler):
         Raises:
             LookupError: If it can't find the definition for `$ref`.
         """
-        pass
+        if isinstance(maybe_ref_json_schema, dict) and '$ref' in maybe_ref_json_schema:
+            ref = maybe_ref_json_schema['$ref']
+            if not ref.startswith('#/definitions/'):
+                raise ValueError(f"Invalid $ref format: {ref}")
+            definition_key = ref[len('#/definitions/'):]
+            if definition_key not in self.generate_json_schema.definitions:
+                raise LookupError(f"Definition '{definition_key}' not found")
+            return self.generate_json_schema.definitions[definition_key]
+        return maybe_ref_json_schema
 
 class CallbackGetCoreSchemaHandler(GetCoreSchemaHandler):
     """Wrapper to use an arbitrary function as a `GetCoreSchemaHandler`.
@@ -80,4 +88,11 @@ class CallbackGetCoreSchemaHandler(GetCoreSchemaHandler):
         Raises:
             LookupError: If it can't find the definition for reference.
         """
-        pass
+        if isinstance(maybe_ref_schema, dict) and 'type' in maybe_ref_schema and maybe_ref_schema['type'] == 'definition-ref':
+            ref = maybe_ref_schema.get('schema_ref')
+            if ref is None:
+                raise ValueError("Invalid definition-ref schema: missing 'schema_ref'")
+            if ref not in self._generate_schema.defs.definitions:
+                raise LookupError(f"Definition '{ref}' not found")
+            return self._generate_schema.defs.definitions[ref]
+        return maybe_ref_schema
