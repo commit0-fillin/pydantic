@@ -207,11 +207,10 @@ class IPvAnyAddress:
         try:
             return IPv4Address(value)
         except ValueError:
-            pass
-        try:
-            return IPv6Address(value)
-        except ValueError:
-            raise PydanticCustomError('ip_any_address', 'value is not a valid IPv4 or IPv6 address')
+            try:
+                return IPv6Address(value)
+            except ValueError:
+                raise PydanticCustomError('ip_any_address', 'value is not a valid IPv4 or IPv6 address')
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema: core_schema.CoreSchema, handler: _schema_generation_shared.GetJsonSchemaHandler) -> JsonSchemaValue:
@@ -232,11 +231,10 @@ class IPvAnyInterface:
         try:
             return IPv4Interface(value)
         except ValueError:
-            pass
-        try:
-            return IPv6Interface(value)
-        except ValueError:
-            raise PydanticCustomError('ip_any_interface', 'value is not a valid IPv4 or IPv6 interface')
+            try:
+                return IPv6Interface(value)
+            except ValueError:
+                raise PydanticCustomError('ip_any_interface', 'value is not a valid IPv4 or IPv6 interface')
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema: core_schema.CoreSchema, handler: _schema_generation_shared.GetJsonSchemaHandler) -> JsonSchemaValue:
@@ -261,11 +259,10 @@ else:
             try:
                 return IPv4Network(value)
             except ValueError:
-                pass
-            try:
-                return IPv6Network(value)
-            except ValueError:
-                raise PydanticCustomError('ip_any_network', 'value is not a valid IPv4 or IPv6 network')
+                try:
+                    return IPv6Network(value)
+                except ValueError:
+                    raise PydanticCustomError('ip_any_network', 'value is not a valid IPv4 or IPv6 network')
 
         @classmethod
         def __get_pydantic_json_schema__(cls, core_schema: core_schema.CoreSchema, handler: _schema_generation_shared.GetJsonSchemaHandler) -> JsonSchemaValue:
@@ -290,5 +287,14 @@ def validate_email(value: str) -> tuple[str, str]:
         * `"John Doe <local_part@domain.com>"` style "pretty" email addresses are processed.
         * Spaces are striped from the beginning and end of addresses, but no error is raised.
     """
-    pass
+    import_email_validator()
+    from email_validator import EmailNotValidError, validate_email as _validate_email
+
+    value = value.strip()
+
+    try:
+        email_info = _validate_email(value, check_deliverability=False)
+        return email_info.local_part, email_info.domain
+    except EmailNotValidError as e:
+        raise PydanticCustomError('value_error.email', 'value is not a valid email address') from e
 __getattr__ = getattr_migration(__name__)
