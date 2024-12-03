@@ -13,7 +13,7 @@ from pydantic_core._pydantic_core import PydanticKnownError
 
 def sequence_validator(input_value: typing.Sequence[Any], /, validator: core_schema.ValidatorFunctionWrapHandler) -> typing.Sequence[Any]:
     """Validator for `Sequence` types, isinstance(v, Sequence) has already been called."""
-    pass
+    return [validator(item) for item in input_value]
 
 def _import_string_logic(dotted_path: str) -> Any:
     """Inspired by uvicorn — dotted paths should include a colon before the final item if that item is not a module.
@@ -33,7 +33,22 @@ def _import_string_logic(dotted_path: str) -> Any:
     * the substring of `dotted_path` before the colon is not a valid module in the environment (e.g., '123:Mapping')
     * the substring of `dotted_path` after the colon is not an attribute of the module (e.g., 'collections:abc123')
     """
-    pass
+    if dotted_path.count(':') > 1:
+        raise ImportError(f"Invalid dotted path: '{dotted_path}'. Only one colon allowed.")
+
+    try:
+        if ':' in dotted_path:
+            module_path, class_name = dotted_path.rsplit(':', 1)
+            module = __import__(module_path, fromlist=[class_name])
+            return getattr(module, class_name)
+        else:
+            return __import__(dotted_path)
+    except ImportError:
+        if '.' in dotted_path:
+            module_path, class_name = dotted_path.rsplit('.', 1)
+            module = __import__(module_path, fromlist=[class_name])
+            return getattr(module, class_name)
+        raise
 PatternType = typing.TypeVar('PatternType', str, bytes)
 
 def ip_v4_network_validator(input_value: Any, /) -> IPv4Network:
@@ -42,7 +57,10 @@ def ip_v4_network_validator(input_value: Any, /) -> IPv4Network:
     See more:
     https://docs.python.org/library/ipaddress.html#ipaddress.IPv4Network
     """
-    pass
+    try:
+        return IPv4Network(input_value)
+    except ValueError as e:
+        raise PydanticCustomError('ip_v4_network', 'Invalid IPv4 network address') from e
 
 def ip_v6_network_validator(input_value: Any, /) -> IPv6Network:
     """Assume IPv6Network initialised with a default `strict` argument.
@@ -50,9 +68,15 @@ def ip_v6_network_validator(input_value: Any, /) -> IPv6Network:
     See more:
     https://docs.python.org/library/ipaddress.html#ipaddress.IPv6Network
     """
-    pass
+    try:
+        return IPv6Network(input_value)
+    except ValueError as e:
+        raise PydanticCustomError('ip_v6_network', 'Invalid IPv6 network address') from e
 _CONSTRAINT_TO_VALIDATOR_MAP: dict[str, Callable] = {'gt': greater_than_validator, 'ge': greater_than_or_equal_validator, 'lt': less_than_validator, 'le': less_than_or_equal_validator, 'multiple_of': multiple_of_validator, 'min_length': min_length_validator, 'max_length': max_length_validator}
 
 def get_constraint_validator(constraint: str) -> Callable:
     """Fetch the validator function for the given constraint."""
-    pass
+    validator = _CONSTRAINT_TO_VALIDATOR_MAP.get(constraint)
+    if validator is None:
+        raise ValueError(f"Unknown constraint: {constraint}")
+    return validator
