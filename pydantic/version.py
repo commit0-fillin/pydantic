@@ -9,11 +9,28 @@ def version_short() -> str:
 
     It returns '2.1' if Pydantic version is '2.1.1'.
     """
-    pass
+    return '.'.join(VERSION.split('.')[:2])
 
 def version_info() -> str:
     """Return complete version information for Pydantic and its dependencies."""
-    pass
+    import sys
+    import platform
+    from pydantic._internal import _git
+
+    info = [
+        f'pydantic version: {VERSION}',
+        f'platform: {platform.platform()}',
+        f'python version: {platform.python_version()}',
+    ]
+
+    if _git.is_git_repo('.'):
+        info.append(f'git revision: {_git.git_revision(".")}')
+    elif _git.have_git():
+        info.append('git revision: Not available (not a git repository)')
+    else:
+        info.append('git revision: Not available (git not installed)')
+
+    return '\n'.join(info)
 
 def parse_mypy_version(version: str) -> tuple[int, ...]:
     """Parse mypy string version to tuple of ints.
@@ -27,4 +44,7 @@ def parse_mypy_version(version: str) -> tuple[int, ...]:
     Returns:
         A tuple of ints. e.g. (0, 930).
     """
-    pass
+    # Split the version string at '+' and take the first part
+    version = version.split('+')[0]
+    # Split the version string by '.' and convert each part to int
+    return tuple(int(part) for part in version.split('.'))
