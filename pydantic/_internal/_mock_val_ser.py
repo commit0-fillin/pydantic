@@ -60,7 +60,9 @@ def set_model_mocks(cls: type[BaseModel], cls_name: str, undefined_name: str='al
         cls_name: Name of the model class, used in error messages
         undefined_name: Name of the undefined thing, used in error messages
     """
-    pass
+    error_message = f"'{cls_name}' is not fully defined: {undefined_name} are not fully defined"
+    cls.__pydantic_validator__ = MockValSer(error_message, code='class-not-fully-defined', val_or_ser='validator')
+    cls.__pydantic_serializer__ = MockValSer(error_message, code='class-not-fully-defined', val_or_ser='serializer')
 
 def set_dataclass_mocks(cls: type[PydanticDataclass], cls_name: str, undefined_name: str='all referenced types') -> None:
     """Set `__pydantic_validator__` and `__pydantic_serializer__` to `MockValSer`s on a dataclass.
@@ -70,4 +72,6 @@ def set_dataclass_mocks(cls: type[PydanticDataclass], cls_name: str, undefined_n
         cls_name: Name of the model class, used in error messages
         undefined_name: Name of the undefined thing, used in error messages
     """
-    pass
+    error_message = f"'{cls_name}' is not fully defined: {undefined_name} are not fully defined"
+    cls.__pydantic_validator__ = MockValSer(error_message, code='class-not-fully-defined', val_or_ser='validator')
+    cls.__pydantic_serializer__ = MockValSer(error_message, code='class-not-fully-defined', val_or_ser='serializer')
