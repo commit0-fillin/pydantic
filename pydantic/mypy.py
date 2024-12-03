@@ -50,7 +50,10 @@ def plugin(version: str) -> type[Plugin]:
     Return:
         The Pydantic mypy plugin type.
     """
-    pass
+    parsed_version = parse_mypy_version(version)
+    if parsed_version < (0, 930):
+        warnings.warn(f"Pydantic mypy plugin requires mypy version >= 0.930, found {version}")
+    return PydanticPlugin
 
 class PydanticPlugin(Plugin):
     """The Pydantic mypy plugin."""
@@ -62,26 +65,36 @@ class PydanticPlugin(Plugin):
 
     def get_base_class_hook(self, fullname: str) -> Callable[[ClassDefContext], bool] | None:
         """Update Pydantic model class."""
-        pass
+        if fullname in (BASEMODEL_FULLNAME, BASESETTINGS_FULLNAME):
+            return self._pydantic_model_class_maker_callback
+        return None
 
     def get_metaclass_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
         """Update Pydantic `ModelMetaclass` definition."""
-        pass
+        if fullname == MODEL_METACLASS_FULLNAME:
+            return self._pydantic_model_metaclass_marker_callback
+        return None
 
     def get_function_hook(self, fullname: str) -> Callable[[FunctionContext], Type] | None:
         """Adjust the return type of the `Field` function."""
-        pass
+        if fullname == FIELD_FULLNAME:
+            return self._pydantic_field_callback
+        return None
 
     def get_method_hook(self, fullname: str) -> Callable[[MethodContext], Type] | None:
         """Adjust return type of `from_orm` method call."""
-        pass
+        if fullname.endswith('.from_attributes'):
+            return from_attributes_callback
+        return None
 
     def get_class_decorator_hook(self, fullname: str) -> Callable[[ClassDefContext], None] | None:
         """Mark pydantic.dataclasses as dataclass.
 
         Mypy version 1.1.1 added support for `@dataclass_transform` decorator.
         """
-        pass
+        if fullname == DATACLASS_FULLNAME:
+            return dataclasses.dataclass_class_maker_callback
+        return None
 
     def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:
         """Return all plugin config data.
