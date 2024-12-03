@@ -17,7 +17,14 @@ def create_schema_validator(schema: CoreSchema, schema_type: Any, schema_type_mo
     Returns:
         If plugins are installed then return `PluggableSchemaValidator`, otherwise return `SchemaValidator`.
     """
-    pass
+    from ._loader import get_plugins
+
+    plugins = list(get_plugins())
+    if plugins:
+        schema_type_path = SchemaTypePath(schema_type_module, schema_type_name)
+        return PluggableSchemaValidator(schema, schema_type, schema_type_path, schema_kind, config, plugins, plugin_settings or {})
+    else:
+        return SchemaValidator(schema, config)
 
 class PluggableSchemaValidator:
     """Pluggable schema validator."""
@@ -50,4 +57,9 @@ def filter_handlers(handler_cls: BaseValidateHandlerProtocol, method_name: str) 
     """Filter out handler methods which are not implemented by the plugin directly - e.g. are missing
     or are inherited from the protocol.
     """
-    pass
+    method = getattr(handler_cls, method_name, None)
+    if method is None:
+        return False
+    
+    # Check if the method is defined in the handler_cls and not inherited from BaseValidateHandlerProtocol
+    return method.__qualname__.split('.')[0] == handler_cls.__name__
