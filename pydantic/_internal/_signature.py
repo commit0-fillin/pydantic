@@ -21,7 +21,11 @@ def _field_name_for_signature(field_name: str, field_info: FieldInfo) -> str:
     Returns:
         The correct name to use when generating a signature.
     """
-    pass
+    if isinstance(field_info.validation_alias, str):
+        return field_info.validation_alias
+    elif field_info.alias:
+        return field_info.alias
+    return field_name
 
 def _process_param_defaults(param: Parameter) -> Parameter:
     """Modify the signature for a parameter in a dataclass where the default value is a FieldInfo instance.
@@ -32,11 +36,39 @@ def _process_param_defaults(param: Parameter) -> Parameter:
     Returns:
         Parameter: The custom processed parameter
     """
-    pass
+    if isinstance(param.default, FieldInfo):
+        default = param.default.default
+        if default is PydanticUndefined:
+            default = Parameter.empty
+        return param.replace(default=default)
+    return param
 
 def _generate_signature_parameters(init: Callable[..., None], fields: dict[str, FieldInfo], config_wrapper: ConfigWrapper) -> dict[str, Parameter]:
     """Generate a mapping of parameter names to Parameter objects for a pydantic BaseModel or dataclass."""
-    pass
+    signature = signature(init)
+    parameters = {}
+
+    for name, param in signature.parameters.items():
+        if name == 'self':
+            continue
+
+        if name in fields:
+            field_info = fields[name]
+            param_name = _field_name_for_signature(name, field_info)
+            default = field_info.get_default()
+            if default is PydanticUndefined:
+                default = Parameter.empty
+            annotation = field_info.annotation if field_info.annotation is not None else param.annotation
+            parameters[param_name] = Parameter(
+                param_name,
+                kind=param.kind,
+                default=default,
+                annotation=annotation
+            )
+        else:
+            parameters[name] = param
+
+    return parameters
 
 def generate_pydantic_signature(init: Callable[..., None], fields: dict[str, FieldInfo], config_wrapper: ConfigWrapper, is_dataclass: bool=False) -> Signature:
     """Generate signature for a pydantic BaseModel or dataclass.
@@ -50,4 +82,9 @@ def generate_pydantic_signature(init: Callable[..., None], fields: dict[str, Fie
     Returns:
         The dataclass/BaseModel subclass signature.
     """
-    pass
+    parameters = _generate_signature_parameters(init, fields, config_wrapper)
+    
+    if is_dataclass:
+        parameters = {name: _process_param_defaults(param) for name, param in parameters.items()}
+    
+    return Signature(list(parameters.values()))
