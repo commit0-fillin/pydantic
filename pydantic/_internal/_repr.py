@@ -72,4 +72,25 @@ def display_as_type(obj: Any) -> str:
 
     Takes some logic from `typing._type_repr`.
     """
-    pass
+    if isinstance(obj, type):
+        if obj.__module__ == 'builtins':
+            return obj.__qualname__
+        return f'{obj.__module__}.{obj.__qualname__}'
+    
+    if obj is ...:
+        return '...'
+    
+    if obj is Any:
+        return 'Any'
+    
+    if isinstance(obj, _typing_extra.TypeAliasType):
+        return obj.__name__
+    
+    if isinstance(obj, (types.GenericAlias, types.UnionType, typing._GenericAlias)):
+        params = ', '.join(display_as_type(param) for param in _typing_extra.get_args(obj))
+        return f'{_typing_extra.get_origin(obj).__name__}[{params}]'
+    
+    if isinstance(obj, typing._SpecialForm):
+        return obj._name
+    
+    return repr(obj)
