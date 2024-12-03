@@ -44,7 +44,26 @@ def schema(models: Sequence[Union[Type['BaseModel'], Type['Dataclass']]], *, by_
     :return: dict with the JSON Schema with a ``definitions`` top-level key including the schema definitions for
       the models and sub-models passed in ``models``.
     """
-    pass
+    clean_models = [model for model in models if model is not None]
+    flat_models = get_flat_models_from_models(clean_models)
+    model_name_map = get_model_name_map(flat_models)
+    definitions = {}
+    output_schema: Dict[str, Any] = {}
+    for model in clean_models:
+        m_schema, m_definitions, m_nested_models = model_process_schema(
+            model, by_alias=by_alias, model_name_map=model_name_map, ref_prefix=ref_prefix, ref_template=ref_template
+        )
+        definitions.update(m_definitions)
+        model_name = model_name_map[model]
+        definitions[model_name] = m_schema
+
+    if title:
+        output_schema['title'] = title
+    if description:
+        output_schema['description'] = description
+
+    output_schema['definitions'] = definitions
+    return output_schema
 
 def model_schema(model: Union[Type['BaseModel'], Type['Dataclass']], by_alias: bool=True, ref_prefix: Optional[str]=None, ref_template: str=default_ref_template) -> Dict[str, Any]:
     """
@@ -63,7 +82,14 @@ def model_schema(model: Union[Type['BaseModel'], Type['Dataclass']], by_alias: b
       sibling json file in a ``/schemas`` directory use ``"/schemas/${model}.json#"``.
     :return: dict with the JSON Schema for the passed ``model``
     """
-    pass
+    flat_models = get_flat_models_from_model(model)
+    model_name_map = get_model_name_map(flat_models)
+    model_name = model_name_map[model]
+    m_schema, definitions, nested_models = model_process_schema(
+        model, by_alias=by_alias, model_name_map=model_name_map, ref_prefix=ref_prefix, ref_template=ref_template
+    )
+    definitions[model_name] = m_schema
+    return {'definitions': definitions, **m_schema}
 
 def field_schema(field: ModelField, *, by_alias: bool=True, model_name_map: Dict[TypeModelOrEnum, str], ref_prefix: Optional[str]=None, ref_template: str=default_ref_template, known_models: Optional[TypeModelSet]=None) -> Tuple[Dict[str, Any], Dict[str, Any], Set[str]]:
     """
@@ -83,7 +109,39 @@ def field_schema(field: ModelField, *, by_alias: bool=True, model_name_map: Dict
     :param known_models: used to solve circular references
     :return: tuple of the schema for this field and additional definitions
     """
-    pass
+    schema_overrides = False
+
+    field_info = field.field_info
+    if field_info.extra:
+        schema = dict(field_info.extra)
+        if 'type' in schema:
+            schema_overrides = True
+    else:
+        schema = {}
+
+    if field.field_info is not None and field.field_info.title is not None:
+        schema['title'] = field.field_info.title
+
+    validation_schema = get_field_schema_validations(field)
+    if validation_schema:
+        schema.update(validation_schema)
+
+    f_schema, f_definitions, f_nested_models = field_type_schema(
+        field,
+        by_alias=by_alias,
+        model_name_map=model_name_map,
+        schema_overrides=schema_overrides,
+        ref_prefix=ref_prefix,
+        ref_template=ref_template,
+        known_models=known_models or set(),
+    )
+    # Merge the field schema into the main schema
+    schema.update(f_schema)
+
+    # Remove None values from the schema
+    schema = {k: v for k, v in schema.items() if v is not None}
+
+    return schema, f_definitions, f_nested_models
 numeric_types = (int, float, Decimal)
 _str_types_attrs: Tuple[Tuple[str, Union[type, Tuple[type, ...]], str], ...] = (('max_length', numeric_types, 'maxLength'), ('min_length', numeric_types, 'minLength'), ('regex', str, 'pattern'))
 _numeric_types_attrs: Tuple[Tuple[str, Union[type, Tuple[type, ...]], str], ...] = (('gt', numeric_types, 'exclusiveMinimum'), ('lt', numeric_types, 'exclusiveMaximum'), ('ge', numeric_types, 'minimum'), ('le', numeric_types, 'maximum'), ('multiple_of', numeric_types, 'multipleOf'))
@@ -93,7 +151,34 @@ def get_field_schema_validations(field: ModelField) -> Dict[str, Any]:
     Get the JSON Schema validation keywords for a ``field`` with an annotation of
     a Pydantic ``FieldInfo`` with validation arguments.
     """
-    pass
+    validators = {}
+    field_info = field.field_info
+    if isinstance(field_info, FieldInfo):
+        if field_info.const:
+            validators['const'] = field.default
+        if field_info.gt is not None:
+            validators['exclusiveMinimum'] = field_info.gt
+        if field_info.ge is not None:
+            validators['minimum'] = field_info.ge
+        if field_info.lt is not None:
+            validators['exclusiveMaximum'] = field_info.lt
+        if field_info.le is not None:
+            validators['maximum'] = field_info.le
+        if field_info.multiple_of is not None:
+            validators['multipleOf'] = field_info.multiple_of
+        if field_info.min_items is not None:
+            validators['minItems'] = field_info.min_items
+        if field_info.max_items is not None:
+            validators['maxItems'] = field_info.max_items
+        if field_info.min_length is not None:
+            validators['minLength'] = field_info.min_length
+        if field_info.max_length is not None:
+            validators['maxLength'] = field_info.max_length
+        if field_info.regex:
+            validators['pattern'] = field_info.regex
+        if field_info.unique_items:
+            validators['uniqueItems'] = True
+    return validators
 
 def get_model_name_map(unique_models: TypeModelSet) -> Dict[TypeModelOrEnum, str]:
     """
@@ -105,7 +190,24 @@ def get_model_name_map(unique_models: TypeModelSet) -> Dict[TypeModelOrEnum, str
     :param unique_models: a Python set of models
     :return: dict mapping models to names
     """
-    pass
+    name_model_map = {}
+    conflicting_names: Set[str] = set()
+    for model in unique_models:
+        model_name = normalize_name(model.__name__)
+        if model_name in name_model_map:
+            conflicting_names.add(model_name)
+        name_model_map[model_name] = model
+
+    for model_name in conflicting_names:
+        competing_models = [
+            model for model in unique_models if normalize_name(model.__name__) == model_name
+        ]
+        for model in competing_models:
+            model_name = f'{model.__module__}.{model.__name__}'
+            module_parts = model_name.rsplit('.', 1)[0].split('.')
+            model_name = '.'.join([normalize_name(part) for part in module_parts])
+
+    return {model: name for name, model in name_model_map.items()}
 
 def get_flat_models_from_model(model: Type['BaseModel'], known_models: Optional[TypeModelSet]=None) -> TypeModelSet:
     """
