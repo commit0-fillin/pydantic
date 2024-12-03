@@ -23,4 +23,9 @@ def validate_call(func: AnyCallableT | None=None, /, *, config: ConfigDict | Non
     Returns:
         The decorated function.
     """
-    pass
+    def decorator(f: AnyCallableT) -> AnyCallableT:
+        return _validate_call(f, config, validate_return)
+
+    if func:
+        return decorator(func)
+    return decorator
