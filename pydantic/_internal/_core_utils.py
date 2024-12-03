@@ -25,13 +25,24 @@ def get_type_ref(type_: type[Any], args_override: tuple[type[Any], ...] | None=N
     This `args_override` argument was added for the purpose of creating valid recursive references
     when creating generic models without needing to create a concrete class.
     """
-    pass
+    if args_override is not None:
+        type_args = args_override
+    elif is_generic_alias(type_):
+        type_args = get_args(type_)
+    else:
+        type_args = ()
+    
+    if type_args:
+        args_str = ','.join(get_type_ref(arg) for arg in type_args)
+        return f'{type_.__name__}[{args_str}]'
+    else:
+        return type_.__name__
 
 def get_ref(s: core_schema.CoreSchema) -> None | str:
     """Get the ref from the schema if it has one.
     This exists just for type checking to work correctly.
     """
-    pass
+    return s.get('ref')
 T = TypeVar('T')
 Recurse = Callable[[core_schema.CoreSchema, 'Walk'], core_schema.CoreSchema]
 Walk = Callable[[core_schema.CoreSchema, Recurse], core_schema.CoreSchema]
@@ -56,7 +67,7 @@ def walk_core_schema(schema: core_schema.CoreSchema, f: Walk) -> core_schema.Cor
     Returns:
         core_schema.CoreSchema: A processed CoreSchema.
     """
-    pass
+    return _dispatch(schema, f)
 
 def pretty_print_core_schema(schema: CoreSchema, include_metadata: bool=False) -> None:
     """Pretty print a CoreSchema using rich.
@@ -66,4 +77,19 @@ def pretty_print_core_schema(schema: CoreSchema, include_metadata: bool=False) -
         schema: The CoreSchema to print.
         include_metadata: Whether to include metadata in the output. Defaults to `False`.
     """
-    pass
+    try:
+        from rich import print as rich_print
+        from rich.pretty import Pretty
+    except ImportError:
+        print("Rich library is not installed. Please install it to use this function.")
+        return
+
+    def _process_schema(s: CoreSchema) -> dict:
+        result = {k: v for k, v in s.items() if k != 'metadata' or include_metadata}
+        for key, value in result.items():
+            if isinstance(value, dict) and 'type' in value:
+                result[key] = _process_schema(value)
+        return result
+
+    processed_schema = _process_schema(schema)
+    rich_print(Pretty(processed_schema, expand_all=True))
