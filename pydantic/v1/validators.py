@@ -33,7 +33,9 @@ def constant_validator(v: 'Any', field: 'ModelField') -> 'Any':
     of the field. This is to support the keyword of the same name in JSON
     Schema.
     """
-    pass
+    if field.default is not None and v != field.default:
+        raise errors_.WrongConstantError(given=v, permitted=[field.default])
+    return v
 
 def ip_v4_network_validator(v: Any) -> IPv4Network:
     """
@@ -42,7 +44,10 @@ def ip_v4_network_validator(v: Any) -> IPv4Network:
     See more:
     https://docs.python.org/library/ipaddress.html#ipaddress.IPv4Network
     """
-    pass
+    try:
+        return IPv4Network(v)
+    except (ValueError, TypeError) as e:
+        raise errors_.IPv4NetworkError() from e
 
 def ip_v6_network_validator(v: Any) -> IPv6Network:
     """
@@ -51,7 +56,10 @@ def ip_v6_network_validator(v: Any) -> IPv6Network:
     See more:
     https://docs.python.org/library/ipaddress.html#ipaddress.IPv6Network
     """
-    pass
+    try:
+        return IPv6Network(v)
+    except (ValueError, TypeError) as e:
+        raise errors_.IPv6NetworkError() from e
 
 def callable_validator(v: Any) -> AnyCallable:
     """
@@ -59,7 +67,9 @@ def callable_validator(v: Any) -> AnyCallable:
 
     Note: complete matching of argument type hints and return types is not performed
     """
-    pass
+    if not callable(v):
+        raise errors_.CallableError(value=v)
+    return v
 T = TypeVar('T')
 NamedTupleT = TypeVar('NamedTupleT', bound=NamedTuple)
 
