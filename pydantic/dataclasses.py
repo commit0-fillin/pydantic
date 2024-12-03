@@ -50,7 +50,37 @@ def dataclass(_cls: type[_T] | None=None, *, init: Literal[False]=False, repr: b
     Raises:
         AssertionError: Raised if `init` is not `False` or `validate_on_init` is `False`.
     """
-    pass
+    def wrap(cls: type[_T]) -> type[PydanticDataclass]:
+        if validate_on_init is False:
+            raise AssertionError("`validate_on_init=False` is not supported in v2")
+        
+        if init is not False:
+            raise AssertionError("`init` must be False for pydantic dataclasses")
+
+        cls_dict = dict(cls.__dict__)
+        cls_dict['__pydantic_config__'] = _config.ConfigWrapper(config)
+        cls_dict['__pydantic_decorators__'] = _decorators.DecoratorInfos.build(cls)
+        cls_dict['__pydantic_complete__'] = False
+
+        std_dataclass = dataclasses.dataclass(
+            cls,
+            init=False,
+            repr=repr,
+            eq=eq,
+            order=order,
+            unsafe_hash=unsafe_hash,
+            frozen=frozen,
+            kw_only=kw_only,
+            slots=slots,
+        )
+
+        complete_dataclass(std_dataclass, cls_dict['__pydantic_config__'], raise_errors=False, types_namespace=None)
+        return std_dataclass
+
+    if _cls is None:
+        return wrap
+
+    return wrap(_cls)
 __getattr__ = getattr_migration(__name__)
 if (3, 8) <= sys.version_info < (3, 11):
 
@@ -59,7 +89,7 @@ if (3, 8) <= sys.version_info < (3, 11):
         if you were to try calling `InitVar[int]()` without this monkeypatch. The whole purpose is just
         to ensure typing._type_check does not error if the type hint evaluates to `InitVar[<parameter>]`.
         """
-        pass
+        raise TypeError("Cannot instantiate InitVar")
     dataclasses.InitVar.__call__ = _call_initvar
 
 def rebuild_dataclass(cls: type[PydanticDataclass], *, force: bool=False, raise_errors: bool=True, _parent_namespace_depth: int=2, _types_namespace: dict[str, Any] | None=None) -> bool | None:
@@ -81,7 +111,14 @@ def rebuild_dataclass(cls: type[PydanticDataclass], *, force: bool=False, raise_
         Returns `None` if the schema is already "complete" and rebuilding was not required.
         If rebuilding _was_ required, returns `True` if rebuilding was successful, otherwise `False`.
     """
-    pass
+    if not force and cls.__pydantic_complete__:
+        return None
+
+    if _types_namespace is None:
+        _types_namespace = _typing_extra.parent_frame_namespace(parent_depth=_parent_namespace_depth)
+
+    config_wrapper = _config.ConfigWrapper(cls.__pydantic_config__)
+    return complete_dataclass(cls, config_wrapper, raise_errors=raise_errors, types_namespace=_types_namespace)
 
 def is_pydantic_dataclass(class_: type[Any], /) -> TypeGuard[type[PydanticDataclass]]:
     """Whether a class is a pydantic dataclass.
@@ -92,4 +129,4 @@ def is_pydantic_dataclass(class_: type[Any], /) -> TypeGuard[type[PydanticDatacl
     Returns:
         `True` if the class is a pydantic dataclass, `False` otherwise.
     """
-    pass
+    return hasattr(class_, '__pydantic_complete__')
