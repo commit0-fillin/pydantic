@@ -59,7 +59,8 @@ def set_dataclass_fields(cls: type[StandardDataclass], types_namespace: dict[str
         types_namespace: The types namespace, defaults to `None`.
         config_wrapper: The config wrapper instance, defaults to `None`.
     """
-    pass
+    fields = collect_dataclass_fields(cls, types_namespace, config_wrapper)
+    cls.__pydantic_fields__ = fields
 
 def complete_dataclass(cls: type[Any], config_wrapper: _config.ConfigWrapper, *, raise_errors: bool=True, types_namespace: dict[str, Any] | None) -> bool:
     """Finish building a pydantic dataclass.
@@ -80,7 +81,22 @@ def complete_dataclass(cls: type[Any], config_wrapper: _config.ConfigWrapper, *,
     Raises:
         PydanticUndefinedAnnotation: If `raise_error` is `True` and there is an undefined annotations.
     """
-    pass
+    try:
+        set_dataclass_fields(cls, types_namespace, config_wrapper)
+        
+        generate_schema = GenerateSchema(config_wrapper)
+        core_schema = generate_schema.generate_schema(cls)
+        
+        cls.__pydantic_core_schema__ = core_schema
+        cls.__pydantic_validator__ = create_schema_validator(core_schema, cls, config_wrapper)
+        cls.__pydantic_serializer__ = SchemaSerializer(core_schema)
+        
+        cls.__pydantic_complete__ = True
+        return True
+    except PydanticUndefinedAnnotation:
+        if raise_errors:
+            raise
+        return False
 
 def is_builtin_dataclass(_cls: type[Any]) -> TypeGuard[type[StandardDataclass]]:
     """Returns True if a class is a stdlib dataclass and *not* a pydantic dataclass.
@@ -112,4 +128,13 @@ def is_builtin_dataclass(_cls: type[Any]) -> TypeGuard[type[StandardDataclass]]:
     Returns:
         `True` if the class is a stdlib dataclass, `False` otherwise.
     """
-    pass
+    if not dataclasses.is_dataclass(_cls):
+        return False
+    
+    if hasattr(_cls, '__pydantic_validator__'):
+        return False
+    
+    annotations = getattr(_cls, '__annotations__', {})
+    dataclass_fields = getattr(_cls, '__dataclass_fields__', {})
+    
+    return set(annotations.keys()).issubset(dataclass_fields.keys())
