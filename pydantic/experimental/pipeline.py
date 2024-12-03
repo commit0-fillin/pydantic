@@ -85,7 +85,7 @@ class _Pipeline(Generic[_InT, _OutT]):
         If used as the first step in a pipeline, the type of the field is used.
         That is, the transformation is applied to after the value is parsed to the field's type.
         """
-        pass
+        return _Pipeline(self._steps + (_Transform(func),))
 
     def validate_as(self, tp: type[_NewOutT] | EllipsisType, *, strict: bool=False) -> _Pipeline[_InT, Any]:
         """Validate / parse the input into a new type.
@@ -95,7 +95,7 @@ class _Pipeline(Generic[_InT, _OutT]):
         Types are parsed in Pydantic's `lax` mode by default,
         but you can enable `strict` mode by passing `strict=True`.
         """
-        pass
+        return _Pipeline(self._steps + (_ValidateAs(tp, strict),))
 
     def validate_as_deferred(self, func: Callable[[], type[_NewOutT]]) -> _Pipeline[_InT, _NewOutT]:
         """Parse the input into a new type, deferring resolution of the type until the current class
@@ -103,9 +103,9 @@ class _Pipeline(Generic[_InT, _OutT]):
 
         This is useful when you need to reference the class in it's own type annotations.
         """
-        pass
+        return _Pipeline(self._steps + (_ValidateAsDefer(func),))
 
-    def constrain(self, constraint: _ConstraintAnnotation) -> Any:
+    def constrain(self, constraint: _ConstraintAnnotation) -> _Pipeline[_InT, _OutT]:
         """Constrain a value to meet a certain condition.
 
         We support most conditions from `annotated_types`, as well as regular expressions.
@@ -113,60 +113,60 @@ class _Pipeline(Generic[_InT, _OutT]):
         Most of the time you'll be calling a shortcut method like `gt`, `lt`, `len`, etc
         so you don't need to call this directly.
         """
-        pass
+        return _Pipeline(self._steps + (_Constraint(constraint),))
 
     def predicate(self: _Pipeline[_InT, _NewOutT], func: Callable[[_NewOutT], bool]) -> _Pipeline[_InT, _NewOutT]:
         """Constrain a value to meet a certain predicate."""
-        pass
+        return self.constrain(annotated_types.Predicate(func))
 
     def gt(self: _Pipeline[_InT, _NewOutGt], gt: _NewOutGt) -> _Pipeline[_InT, _NewOutGt]:
         """Constrain a value to be greater than a certain value."""
-        pass
+        return self.constrain(annotated_types.Gt(gt))
 
     def lt(self: _Pipeline[_InT, _NewOutLt], lt: _NewOutLt) -> _Pipeline[_InT, _NewOutLt]:
         """Constrain a value to be less than a certain value."""
-        pass
+        return self.constrain(annotated_types.Lt(lt))
 
     def ge(self: _Pipeline[_InT, _NewOutGe], ge: _NewOutGe) -> _Pipeline[_InT, _NewOutGe]:
         """Constrain a value to be greater than or equal to a certain value."""
-        pass
+        return self.constrain(annotated_types.Ge(ge))
 
     def le(self: _Pipeline[_InT, _NewOutLe], le: _NewOutLe) -> _Pipeline[_InT, _NewOutLe]:
         """Constrain a value to be less than or equal to a certain value."""
-        pass
+        return self.constrain(annotated_types.Le(le))
 
     def len(self: _Pipeline[_InT, _NewOutLen], min_len: int, max_len: int | None=None) -> _Pipeline[_InT, _NewOutLen]:
         """Constrain a value to have a certain length."""
-        pass
+        return self.constrain(annotated_types.Len(min_len, max_len))
 
     def multiple_of(self: _Pipeline[_InT, Any], multiple_of: Any) -> _Pipeline[_InT, Any]:
         """Constrain a value to be a multiple of a certain number."""
-        pass
+        return self.constrain(annotated_types.MultipleOf(multiple_of))
 
     def eq(self: _Pipeline[_InT, _OutT], value: _OutT) -> _Pipeline[_InT, _OutT]:
         """Constrain a value to be equal to a certain value."""
-        pass
+        return self.constrain(_Eq(value))
 
     def not_eq(self: _Pipeline[_InT, _OutT], value: _OutT) -> _Pipeline[_InT, _OutT]:
         """Constrain a value to not be equal to a certain value."""
-        pass
+        return self.constrain(_NotEq(value))
 
     def in_(self: _Pipeline[_InT, _OutT], values: Container[_OutT]) -> _Pipeline[_InT, _OutT]:
         """Constrain a value to be in a certain set."""
-        pass
+        return self.constrain(_In(values))
 
     def not_in(self: _Pipeline[_InT, _OutT], values: Container[_OutT]) -> _Pipeline[_InT, _OutT]:
         """Constrain a value to not be in a certain set."""
-        pass
+        return self.constrain(_NotIn(values))
 
     def otherwise(self, other: _Pipeline[_OtherIn, _OtherOut]) -> _Pipeline[_InT | _OtherIn, _OutT | _OtherOut]:
         """Combine two validation chains, returning the result of the first chain if it succeeds, and the second chain if it fails."""
-        pass
+        return _Pipeline((_PipelineOr(self, other),))
     __or__ = otherwise
 
     def then(self, other: _Pipeline[_OutT, _OtherOut]) -> _Pipeline[_InT, _OtherOut]:
         """Pipe the result of one validation chain into another."""
-        pass
+        return _Pipeline((_PipelineAnd(self, other),))
     __and__ = then
 
     def __get_pydantic_core_schema__(self, source_type: Any, handler: GetCoreSchemaHandler) -> cs.CoreSchema:
@@ -187,7 +187,35 @@ transform = _Pipeline[Any, Any]((_ValidateAs(_FieldTypeMarker),)).transform
 
 def _apply_constraint(s: cs.CoreSchema | None, constraint: _ConstraintAnnotation) -> cs.CoreSchema:
     """Apply a single constraint to a schema."""
-    pass
+    from pydantic_core import core_schema as cs
+
+    if s is None:
+        s = cs.any_schema()
+
+    if isinstance(constraint, (annotated_types.Gt, annotated_types.Ge, annotated_types.Lt, annotated_types.Le)):
+        return cs.with_constraint(s, constraint)
+    elif isinstance(constraint, annotated_types.Len):
+        return cs.with_constraint(s, constraint)
+    elif isinstance(constraint, annotated_types.MultipleOf):
+        return cs.with_constraint(s, constraint)
+    elif isinstance(constraint, annotated_types.Timezone):
+        return cs.with_constraint(s, constraint)
+    elif isinstance(constraint, annotated_types.Interval):
+        return cs.with_constraint(s, constraint)
+    elif isinstance(constraint, annotated_types.Predicate):
+        return cs.with_constraint(s, constraint)
+    elif isinstance(constraint, _Eq):
+        return cs.with_constraint(s, lambda x: x == constraint.value)
+    elif isinstance(constraint, _NotEq):
+        return cs.with_constraint(s, lambda x: x != constraint.value)
+    elif isinstance(constraint, _In):
+        return cs.with_constraint(s, lambda x: x in constraint.values)
+    elif isinstance(constraint, _NotIn):
+        return cs.with_constraint(s, lambda x: x not in constraint.values)
+    elif isinstance(constraint, Pattern):
+        return cs.with_constraint(s, lambda x: bool(constraint.match(x)))
+    else:
+        raise ValueError(f"Unsupported constraint type: {type(constraint)}")
 
 class _SupportsRange(annotated_types.SupportsLe, annotated_types.SupportsGe, Protocol):
     pass
