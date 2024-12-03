@@ -51,7 +51,26 @@ def make_generic_v1_field_validator(validator: V1Validator) -> core_schema.WithI
         PydanticUserError: If the signature is not supported or the parameters are
             not available in Pydantic V2.
     """
-    pass
+    sig = signature(validator)
+    params = list(sig.parameters.values())
+
+    def wrapped(value: Any, info: core_schema.ValidationInfo) -> Any:
+        kwargs = {}
+        if len(params) >= 2 and params[1].name == 'values':
+            kwargs['values'] = info.data
+        if len(params) >= 3 and params[2].name == 'config':
+            kwargs['config'] = info.config
+        elif len(params) >= 3 and params[2].name == 'field':
+            kwargs['field'] = info.field_info
+        elif len(params) >= 3:
+            raise PydanticUserError(
+                f"Unsupported signature for V1 validator: {sig}",
+                code='validator-v1-signature'
+            )
+
+        return validator(value, **kwargs)
+
+    return wrapped
 RootValidatorValues = Dict[str, Any]
 RootValidatorFieldsTuple = Tuple[Any, ...]
 
@@ -83,4 +102,13 @@ def make_v1_generic_root_validator(validator: V1RootValidatorFunction, pre: bool
     Returns:
         A wrapped V2 style validator.
     """
-    pass
+    if pre:
+        def wrapped(values: RootValidatorValues, info: core_schema.ValidationInfo) -> RootValidatorValues:
+            return validator(values)
+        return wrapped
+    else:
+        def wrapped(fields_tuple: RootValidatorFieldsTuple, info: core_schema.ValidationInfo) -> RootValidatorFieldsTuple:
+            values = dict(zip(info.field_names, fields_tuple))
+            validated_values = validator(values)
+            return tuple(validated_values[field] for field in info.field_names)
+        return wrapped
