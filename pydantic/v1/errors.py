@@ -14,7 +14,7 @@ def cls_kwargs(cls: Type['PydanticErrorMixin'], ctx: 'DictStrAny') -> 'PydanticE
     Since we only use kwargs, we need a little constructor to change that.
     Note: the callable can't be a lambda as pickle looks in the namespace to find it
     """
-    pass
+    return cls(**ctx)
 
 class PydanticErrorMixin:
     code: str
@@ -27,7 +27,7 @@ class PydanticErrorMixin:
         return self.msg_template.format(**self.__dict__)
 
     def __reduce__(self) -> Tuple[Callable[..., 'PydanticErrorMixin'], Tuple[Type['PydanticErrorMixin'], 'DictStrAny']]:
-        return (cls_kwargs, (self.__class__, self.__dict__))
+        return (cls_kwargs, (self.__class__, self.__dict__.copy()))
 
 class PydanticTypeError(PydanticErrorMixin, TypeError):
     pass
