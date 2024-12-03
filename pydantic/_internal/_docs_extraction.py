@@ -24,4 +24,27 @@ def extract_docstrings_from_cls(cls: type[Any], use_inspect: bool=False) -> dict
     Returns:
         A mapping containing attribute names and their corresponding docstring.
     """
-    pass
+    if use_inspect:
+        source = inspect.getsource(cls)
+    else:
+        # Get the source code from the frame
+        frame = inspect.currentframe()
+        try:
+            while frame:
+                if frame.f_code.co_name == '<module>':
+                    source = ''.join(frame.f_locals.get('__source__', ''))
+                    break
+                frame = frame.f_back
+            else:
+                raise ValueError("Could not find source code")
+        finally:
+            del frame
+
+    # Parse the source code
+    tree = ast.parse(textwrap.dedent(source))
+
+    # Use the DocstringVisitor to extract docstrings
+    visitor = DocstringVisitor()
+    visitor.visit(tree)
+
+    return visitor.attrs
