@@ -49,13 +49,22 @@ def all_literal_values(type_: type[Any]) -> list[Any]:
     Literal can be used recursively (see https://www.python.org/dev/peps/pep-0586)
     e.g. `Literal[Literal[Literal[1, 2, 3], "foo"], 5, None]`.
     """
-    pass
+    if not isinstance(type_, LITERAL_TYPES):
+        return []
+    values = get_args(type_)
+    return [v for value in values for v in (all_literal_values(value) if isinstance(value, LITERAL_TYPES) else [value])]
 
 def is_namedtuple(type_: type[Any]) -> bool:
     """Check if a given class is a named tuple.
     It can be either a `typing.NamedTuple` or `collections.namedtuple`.
     """
-    pass
+    return (
+        isinstance(type_, type)
+        and issubclass(type_, tuple)
+        and hasattr(type_, '_fields')
+        and hasattr(type_, '_field_defaults')
+        and hasattr(type_, '_asdict')
+    )
 test_new_type = typing.NewType('test_new_type', str)
 
 def is_new_type(type_: type[Any]) -> bool:
@@ -63,11 +72,11 @@ def is_new_type(type_: type[Any]) -> bool:
 
     Can't use isinstance because it fails <3.10.
     """
-    pass
+    return hasattr(type_, '__supertype__') and callable(type_)
 
 def _check_finalvar(v: type[Any] | None) -> bool:
     """Check if a given type is a `typing.Final` type."""
-    pass
+    return v is not None and get_origin(v) is Final
 
 def parent_frame_namespace(*, parent_depth: int=2) -> dict[str, Any] | None:
     """We allow use of items in parent namespace to get around the issue with `get_type_hints` only looking in the
@@ -81,18 +90,40 @@ def parent_frame_namespace(*, parent_depth: int=2) -> dict[str, Any] | None:
     dict of exactly what's in scope. Using `f_back` would work sometimes but would be very wrong and confusing in many
     other cases. See https://discuss.python.org/t/is-there-a-way-to-access-parent-nested-namespaces/20659.
     """
-    pass
+    import inspect
+    
+    frame = inspect.currentframe()
+    try:
+        for _ in range(parent_depth):
+            if frame is None:
+                return None
+            frame = frame.f_back
+        return frame.f_locals if frame else None
+    finally:
+        del frame  # Avoid reference cycles
 
 def get_cls_type_hints_lenient(obj: Any, globalns: dict[str, Any] | None=None) -> dict[str, Any]:
     """Collect annotations from a class, including those from parent classes.
 
     Unlike `typing.get_type_hints`, this function will not error if a forward reference is not resolvable.
     """
-    pass
+    hints = {}
+    for base in reversed(obj.__mro__):
+        if base is object:
+            continue
+        base_hints = getattr(base, '__annotations__', {})
+        for name, value in base_hints.items():
+            if isinstance(value, str):
+                value = eval_type_lenient(value, globalns, {})
+            hints[name] = value
+    return hints
 
 def eval_type_lenient(value: Any, globalns: dict[str, Any] | None=None, localns: dict[str, Any] | None=None) -> Any:
     """Behaves like typing._eval_type, except it won't raise an error if a forward reference can't be resolved."""
-    pass
+    try:
+        return eval(value, globalns, localns) if isinstance(value, str) else value
+    except NameError:
+        return value
 
 def eval_type_backport(value: Any, globalns: dict[str, Any] | None=None, localns: dict[str, Any] | None=None, type_params: tuple[Any] | None=None) -> Any:
     """Like `typing._eval_type`, but falls back to the `eval_type_backport` package if it's
@@ -101,13 +132,33 @@ def eval_type_backport(value: Any, globalns: dict[str, Any] | None=None, localns
     and `list[X]` into `typing.List[X]` etc. (for all the types made generic in PEP 585)
     if the original syntax is not supported in the current Python version.
     """
-    pass
+    try:
+        return typing._eval_type(value, globalns, localns)
+    except (AttributeError, TypeError):
+        try:
+            from eval_type_backport import eval_type as eval_type_backport_func
+            return eval_type_backport_func(value, globalns, localns, type_params)
+        except ImportError:
+            return value
 
 def get_function_type_hints(function: Callable[..., Any], *, include_keys: set[str] | None=None, types_namespace: dict[str, Any] | None=None) -> dict[str, Any]:
     """Like `typing.get_type_hints`, but doesn't convert `X` to `Optional[X]` if the default value is `None`, also
     copes with `partial`.
     """
-    pass
+    if isinstance(function, partial):
+        hints = get_function_type_hints(function.func, include_keys=include_keys, types_namespace=types_namespace)
+        if include_keys:
+            hints = {k: v for k, v in hints.items() if k in include_keys}
+        return hints
+
+    if types_namespace is None:
+        types_namespace = parent_frame_namespace()
+    hints = get_type_hints(function, globalns=types_namespace)
+    
+    if include_keys:
+        hints = {k: v for k, v in hints.items() if k in include_keys}
+
+    return hints
 if sys.version_info < (3, 9, 8) or (3, 10) <= sys.version_info < (3, 10, 1):
 
     def _make_forward_ref(arg: Any, is_argument: bool=True, *, is_class: bool=False) -> typing.ForwardRef:
@@ -122,7 +173,10 @@ if sys.version_info < (3, 9, 8) or (3, 10) <= sys.version_info < (3, 10, 1):
 
         Implemented as EAFP with memory.
         """
-        pass
+        try:
+            return typing.ForwardRef(arg, is_argument=is_argument, is_class=is_class)
+        except TypeError:
+            return typing.ForwardRef(arg, is_argument=is_argument)
 else:
     _make_forward_ref = typing.ForwardRef
 if sys.version_info >= (3, 10):
@@ -130,16 +184,39 @@ if sys.version_info >= (3, 10):
 else:
     '\n    For older versions of python, we have a custom implementation of `get_type_hints` which is a close as possible to\n    the implementation in CPython 3.10.8.\n    '
 
-    @typing.no_type_check
-    def get_type_hints(obj: Any, globalns: dict[str, Any] | None=None, localns: dict[str, Any] | None=None, include_extras: bool=False) -> dict[str, Any]:
-        """Taken verbatim from python 3.10.8 unchanged, except:
-        * type annotations of the function definition above.
-        * prefixing `typing.` where appropriate
-        * Use `_make_forward_ref` instead of `typing.ForwardRef` to handle the `is_class` argument.
 
-        https://github.com/python/cpython/blob/aaaf5174241496afca7ce4d4584570190ff972fe/Lib/typing.py#L1773-L1875
+        Return type hints for an object.
 
-        DO NOT CHANGE THIS METHOD UNLESS ABSOLUTELY NECESSARY.
+        This is often the same as obj.__annotations__, but it handles
+        forward references encoded as string literals, adds Optional[t] if a
+        default value equal to None is set and recursively replaces all
+        'Annotated[T, ...]' with 'T' (unless 'include_extras=True').
+
+        The argument may be a module, class, method, or function. The annotations
+        are returned as a dictionary. For classes, annotations include also
+        inherited members.
+
+        TypeError is raised if the argument is not of a type that can contain
+        annotations, and an empty dictionary is returned if no annotations are
+        present.
+
+        BEWARE -- the behavior of globalns and localns is counterintuitive
+        (unless you are familiar with how eval() and exec() work).  The
+        search order is locals first, then globals.
+
+        - If no dict arguments are passed, an attempt is made to use the
+          globals from obj (or the respective module's globals for classes),
+          and these are also used as the locals.  If the object does not appear
+          to have globals, an empty dictionary is used.  For classes, the search
+          order is globals first then locals.
+
+        - If one dict argument is passed, it is used for both globals and
+          locals.
+
+        - If two dict arguments are passed, they specify globals and
+          locals, respectively.
+        """
+        pass
         ======================================================
 
         Return type hints for an object.
@@ -178,4 +255,4 @@ if sys.version_info >= (3, 10):
 
 def is_self_type(tp: Any) -> bool:
     """Check if a given class is a Self type (from `typing` or `typing_extensions`)"""
-    pass
+    return tp is typing.Self if hasattr(typing, 'Self') else tp is typing_extensions.Self
