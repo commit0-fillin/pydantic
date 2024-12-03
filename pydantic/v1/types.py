@@ -64,7 +64,9 @@ else:
             """
             Ensure that we only allow bools.
             """
-            pass
+            if not isinstance(value, bool):
+                raise ValueError('Value must be a boolean')
+            return value
 
 class ConstrainedInt(int, metaclass=ConstrainedNumberMeta):
     strict: bool = False
@@ -462,11 +464,26 @@ class PaymentCardNumber(str):
         yield cls.validate_length_for_brand
 
     @classmethod
+    def validate_digits(cls, card_number: str) -> str:
+        if not card_number.isdigit():
+            raise ValueError('Card number must contain only digits')
+        return card_number
+
+    @classmethod
     def validate_luhn_check_digit(cls, card_number: str) -> str:
         """
         Based on: https://en.wikipedia.org/wiki/Luhn_algorithm
         """
-        pass
+        digits = [int(d) for d in card_number]
+        checksum = 0
+        odd_digits = digits[-1::-2]
+        even_digits = digits[-2::-2]
+        checksum += sum(odd_digits)
+        for digit in even_digits:
+            checksum += sum(divmod(digit * 2, 10))
+        if checksum % 10 != 0:
+            raise ValueError('Invalid card number (failed Luhn check)')
+        return card_number
 
     @classmethod
     def validate_length_for_brand(cls, card_number: 'PaymentCardNumber') -> 'PaymentCardNumber':
@@ -474,7 +491,22 @@ class PaymentCardNumber(str):
         Validate length based on BIN for major brands:
         https://en.wikipedia.org/wiki/Payment_card_number#Issuer_identification_number_(IIN)
         """
-        pass
+        if card_number.brand == PaymentCardBrand.amex and len(card_number) != 15:
+            raise ValueError('American Express card numbers must be 15 digits long')
+        elif card_number.brand in (PaymentCardBrand.mastercard, PaymentCardBrand.visa) and len(card_number) not in (16, 19):
+            raise ValueError(f'{card_number.brand} card numbers must be 16 or 19 digits long')
+        return card_number
+
+    @classmethod
+    def _get_brand(cls, card_number: str) -> PaymentCardBrand:
+        if card_number.startswith(('34', '37')):
+            return PaymentCardBrand.amex
+        elif card_number.startswith('4'):
+            return PaymentCardBrand.visa
+        elif card_number.startswith(('51', '52', '53', '54', '55')):
+            return PaymentCardBrand.mastercard
+        else:
+            return PaymentCardBrand.other
 BYTE_SIZES = {'b': 1, 'kb': 10 ** 3, 'mb': 10 ** 6, 'gb': 10 ** 9, 'tb': 10 ** 12, 'pb': 10 ** 15, 'eb': 10 ** 18, 'kib': 2 ** 10, 'mib': 2 ** 20, 'gib': 2 ** 30, 'tib': 2 ** 40, 'pib': 2 ** 50, 'eib': 2 ** 60}
 BYTE_SIZES.update({k.lower()[0]: v for k, v in BYTE_SIZES.items() if 'i' not in k})
 byte_string_re = re.compile('^\\s*(\\d*\\.?\\d+)\\s*(\\w+)?', re.IGNORECASE)
