@@ -40,10 +40,30 @@ class CoreMetadataHandler:
         """Retrieves the metadata dict from the schema, initializing it to a dict if it is None
         and raises an error if it is not a dict.
         """
-        pass
+        metadata = self._schema.get('metadata')
+        if metadata is None:
+            metadata = CoreMetadata()
+            self._schema['metadata'] = metadata
+        elif not isinstance(metadata, dict):
+            raise TypeError(f'CoreSchema metadata should be a dict; got {metadata!r}.')
+        return metadata
 
 def build_metadata_dict(*, js_functions: list[GetJsonSchemaFunction] | None=None, js_annotation_functions: list[GetJsonSchemaFunction] | None=None, js_prefer_positional_arguments: bool | None=None, typed_dict_cls: type[Any] | None=None, initial_metadata: Any | None=None) -> Any:
     """Builds a dict to use as the metadata field of a CoreSchema object in a manner that is consistent
     with the CoreMetadataHandler class.
     """
-    pass
+    metadata = CoreMetadata() if initial_metadata is None else dict(initial_metadata)
+    
+    if js_functions is not None:
+        metadata['pydantic_js_functions'] = js_functions
+    
+    if js_annotation_functions is not None:
+        metadata['pydantic_js_annotation_functions'] = js_annotation_functions
+    
+    if js_prefer_positional_arguments is not None:
+        metadata['pydantic_js_prefer_positional_arguments'] = js_prefer_positional_arguments
+    
+    if typed_dict_cls is not None:
+        metadata['pydantic_typed_dict_cls'] = typed_dict_cls
+    
+    return metadata
