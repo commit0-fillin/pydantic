@@ -13,8 +13,22 @@ T = TypeVar('T')
 
 def schema_of(type_: Any, *, title: Optional[NameFactory]=None, **schema_kwargs: Any) -> 'DictStrAny':
     """Generate a JSON schema (as dict) for the passed model or dynamically generated one"""
-    pass
+    from pydantic.v1.schema import model_schema
+
+    if isinstance(type_, type) and issubclass(type_, BaseModel):
+        model = type_
+    else:
+        model = create_model('TempModel', __root__=(type_, ...))
+
+    if callable(title):
+        title = title(model)
+
+    return model_schema(model, title=title, **schema_kwargs)
 
 def schema_json_of(type_: Any, *, title: Optional[NameFactory]=None, **schema_json_kwargs: Any) -> str:
     """Generate a JSON schema (as JSON) for the passed model or dynamically generated one"""
-    pass
+    from pydantic.v1.json import pydantic_encoder
+    import json
+
+    schema = schema_of(type_, title=title)
+    return json.dumps(schema, default=pydantic_encoder, **schema_json_kwargs)
