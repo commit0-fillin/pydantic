@@ -7,6 +7,7 @@ from itertools import islice, zip_longest
 from types import BuiltinFunctionType, CodeType, FunctionType, GeneratorType, LambdaType, ModuleType
 from typing import TYPE_CHECKING, AbstractSet, Any, Callable, Collection, Dict, Generator, Iterable, Iterator, List, Mapping, NoReturn, Optional, Set, Tuple, Type, TypeVar, Union
 from dataclasses import is_dataclass
+from dataclasses import is_dataclass
 from typing_extensions import Annotated
 from pydantic.v1.errors import ConfigError
 from pydantic.v1.typing import NoneType, WithArgsTypes, all_literal_values, display_as_type, get_args, get_origin, is_literal_type, is_union
