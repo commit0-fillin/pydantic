@@ -17,6 +17,9 @@ ExtraValues = Literal['allow', 'ignore', 'forbid']
 
 class ConfigDict(TypedDict, total=False):
     """A TypedDict for configuring Pydantic behaviour."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
     title: str | None
     "The title for the generated JSON schema, defaults to the model's name"
     model_title_generator: Callable[[type], str] | None
@@ -126,5 +129,8 @@ def with_config(config: ConfigDict) -> Callable[[_TypeT], _TypeT]:
         #> {'x': 'abc'}
         ```
     """
-    pass
+    def decorator(cls: _TypeT) -> _TypeT:
+        setattr(cls, '__pydantic_config__', config)
+        return cls
+    return decorator
 __getattr__ = getattr_migration(__name__)
