@@ -45,7 +45,15 @@ class GetJsonSchemaHandler:
         Returns:
             JsonSchemaValue: A JsonSchemaValue that has no `$ref`.
         """
-        pass
+        if isinstance(maybe_ref_json_schema, dict) and '$ref' in maybe_ref_json_schema:
+            ref = maybe_ref_json_schema['$ref']
+            if not ref.startswith('#/$defs/'):
+                raise LookupError(f"Invalid $ref: {ref}")
+            schema_key = ref[len('#/$defs/'):]
+            if schema_key not in self.resolve_ref_schema.definitions:
+                raise LookupError(f"Schema not found for $ref: {ref}")
+            return self.resolve_ref_schema.definitions[schema_key]
+        return maybe_ref_json_schema
 
 class GetCoreSchemaHandler:
     """Handler to call into the next CoreSchema schema generation function."""
@@ -78,7 +86,8 @@ class GetCoreSchemaHandler:
         Returns:
             CoreSchema: The `pydantic-core` CoreSchema generated.
         """
-        pass
+        from pydantic._internal._generate_schema import generate_schema
+        return generate_schema(source_type, ref_mode='no-refs')
 
     def resolve_ref_schema(self, maybe_ref_schema: core_schema.CoreSchema, /) -> core_schema.CoreSchema:
         """Get the real schema for a `definition-ref` schema.
@@ -94,13 +103,18 @@ class GetCoreSchemaHandler:
         Returns:
             A concrete `CoreSchema`.
         """
-        pass
+        if isinstance(maybe_ref_schema, dict) and maybe_ref_schema.get('type') == 'definition-ref':
+            ref = maybe_ref_schema.get('schema_ref')
+            if ref not in self.resolve_ref_schema.definitions:
+                raise LookupError(f"Schema not found for ref: {ref}")
+            return self.resolve_ref_schema.definitions[ref]
+        return maybe_ref_schema
 
     @property
     def field_name(self) -> str | None:
         """Get the name of the closest field to this validator."""
-        pass
+        return getattr(self, '_field_name', None)
 
     def _get_types_namespace(self) -> dict[str, Any] | None:
         """Internal method used during type resolution for serializer annotations."""
-        pass
+        return getattr(self, '_types_namespace', None)
