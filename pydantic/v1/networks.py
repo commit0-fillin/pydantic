@@ -56,7 +56,18 @@ def multi_host_url_regex() -> Pattern[str]:
     Additionally to `url_regex` it allows to match multiple hosts.
     E.g. host1.db.net,host2.db.net
     """
-    pass
+    global _multi_host_url_regex_cache
+    if _multi_host_url_regex_cache is None:
+        pattern = (
+            rf'{_scheme_regex}'
+            rf'{_user_info_regex}'
+            r'(?P<hosts>([^/]+))'
+            rf'({_path_regex})?'
+            rf'{_query_regex}'
+            rf'{_fragment_regex}'
+        )
+        _multi_host_url_regex_cache = re.compile(pattern, re.IGNORECASE)
+    return _multi_host_url_regex_cache
 
 class AnyUrl(str):
     strip_whitespace = True
@@ -86,6 +97,14 @@ class AnyUrl(str):
         self.query = query
         self.fragment = fragment
 
+        # Additional validation
+        if self.host_required and not self.host:
+            raise ValueError("Host is required for this URL type")
+        if self.user_required and not self.user:
+            raise ValueError("User is required for this URL type")
+        if self.tld_required and not self.tld:
+            raise ValueError("Top-level domain is required for this URL type")
+
     @classmethod
     def __modify_schema__(cls, field_schema: Dict[str, Any]) -> None:
         update_not_none(field_schema, minLength=cls.min_length, maxLength=cls.max_length, format='uri')
@@ -100,7 +119,22 @@ class AnyUrl(str):
         Validate hosts and build the AnyUrl object. Split from `validate` so this method
         can be altered in `MultiHostDsn`.
         """
-        pass
+        parts = cls.validate_parts(parts)
+
+        host, tld, host_type, port = cls._validate_host(parts['domain'], parts['port'])
+        return cls(
+            url,
+            scheme=parts['scheme'],
+            user=parts['user'],
+            password=parts['password'],
+            host=host,
+            tld=tld,
+            host_type=host_type,
+            port=port,
+            path=parts['path'],
+            query=parts['query'],
+            fragment=parts['fragment'],
+        )
 
     @classmethod
     def validate_parts(cls, parts: 'Parts', validate_port: bool=True) -> 'Parts':
@@ -108,7 +142,18 @@ class AnyUrl(str):
         A method used to validate parts of a URL.
         Could be overridden to set default values for parts if missing
         """
-        pass
+        if cls.allowed_schemes and parts['scheme'] not in cls.allowed_schemes:
+            raise ValueError(f"Scheme {parts['scheme']} not allowed, allowed schemes: {', '.join(cls.allowed_schemes)}")
+
+        if validate_port and parts['port']:
+            port = int(parts['port'])
+            if port > 65_535:
+                raise ValueError('Port cannot exceed 65535')
+
+        if cls.user_required and not parts['user']:
+            raise ValueError('User is required in the URL')
+
+        return parts
 
     def __repr__(self) -> str:
         extra = ', '.join((f'{n}={getattr(self, n)!r}' for n in self.__slots__ if getattr(self, n) is not None))
@@ -236,4 +281,18 @@ def validate_email(value: Union[str]) -> Tuple[str, str]:
     * "John Doe <local_part@domain.com>" style "pretty" email addresses are processed
     * spaces are striped from the beginning and end of addresses but no error is raised
     """
-    pass
+    if email_validator is None:
+        raise ImportError('email-validator is not installed, run `pip install email-validator`')
+
+    value = value.strip()
+
+    if len(value) > MAX_EMAIL_LENGTH:
+        raise ValueError(f'Email address too long, maximum allowed is {MAX_EMAIL_LENGTH} characters')
+
+    try:
+        parsed = email_validator.validate_email(value, check_deliverability=False)
+        name = parsed.local_part
+        email = parsed.email
+        return name, email
+    except email_validator.EmailNotValidError as e:
+        raise ValueError(str(e))
