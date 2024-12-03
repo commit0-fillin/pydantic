@@ -16,4 +16,31 @@ def getattr_migration(module: str) -> Callable[[str], Any]:
     Returns:
         A callable that will raise an error if the object is not found.
     """
-    pass
+    def __getattr__(name: str) -> Any:
+        if name in MOVED_IN_V2:
+            new_location = MOVED_IN_V2[f'{module}:{name}']
+            raise PydanticImportError(
+                f'{name} has been moved to {new_location}. '
+                f'See https://docs.pydantic.dev/2.8/migration/ for more information.'
+            )
+        elif name in DEPRECATED_MOVED_IN_V2:
+            new_location = DEPRECATED_MOVED_IN_V2[f'{module}:{name}']
+            raise PydanticImportError(
+                f'{name} has been moved to {new_location} and is deprecated. '
+                f'See https://docs.pydantic.dev/2.8/migration/ for more information.'
+            )
+        elif name in REDIRECT_TO_V1:
+            new_location = REDIRECT_TO_V1[f'{module}:{name}']
+            raise PydanticImportError(
+                f'{name} is now available as {new_location}. '
+                f'See https://docs.pydantic.dev/2.8/migration/ for more information.'
+            )
+        elif name in REMOVED_IN_V2:
+            raise PydanticImportError(
+                f'{name} has been removed in Pydantic V2. '
+                f'See https://docs.pydantic.dev/2.8/migration/ for more information.'
+            )
+        else:
+            raise AttributeError(f"module '{module}' has no attribute '{name}'")
+
+    return __getattr__
