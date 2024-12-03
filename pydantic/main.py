@@ -119,7 +119,9 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             A dictionary of extra fields, or `None` if `config.extra` is not set to `"allow"`.
         """
-        pass
+        if self.model_config.get('extra') == 'allow':
+            return self.__pydantic_extra__ or None
+        return None
 
     @property
     def model_fields_set(self) -> set[str]:
@@ -129,7 +131,7 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
             A set of strings representing the fields that have been set,
                 i.e. that were not filled from defaults.
         """
-        pass
+        return self.__pydantic_fields_set__
 
     @classmethod
     def model_construct(cls, _fields_set: set[str] | None=None, **values: Any) -> Self:
@@ -152,7 +154,18 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             A new instance of the `Model` class with validated data.
         """
-        pass
+        m = cls.__new__(cls)
+        fields_values = {}
+        extra = {}
+        for name, value in values.items():
+            if name in cls.model_fields:
+                fields_values[name] = value
+            elif cls.model_config.get('extra') == 'allow':
+                extra[name] = value
+        _object_setattr(m, '__dict__', fields_values)
+        _object_setattr(m, '__pydantic_extra__', extra or None)
+        _object_setattr(m, '__pydantic_fields_set__', _fields_set or set(fields_values.keys()))
+        return m
 
     def model_copy(self, *, update: dict[str, Any] | None=None, deep: bool=False) -> Self:
         """Usage docs: https://docs.pydantic.dev/2.8/concepts/serialization/#model_copy
@@ -167,7 +180,22 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             New model instance.
         """
-        pass
+        if deep:
+            # Perform a deep copy
+            copied = self.__deepcopy__({})
+        else:
+            # Perform a shallow copy
+            copied = self.__copy__()
+
+        if update:
+            if self.model_config.get('extra') == 'allow':
+                copied.__dict__.update(update)
+                copied.__pydantic_extra__.update({k: v for k, v in update.items() if k not in self.model_fields})
+            else:
+                copied.__dict__.update({k: v for k, v in update.items() if k in self.model_fields})
+            copied.__pydantic_fields_set__.update(update.keys())
+
+        return copied
 
     def model_dump(self, *, mode: Literal['json', 'python'] | str='python', include: IncEx=None, exclude: IncEx=None, context: Any | None=None, by_alias: bool=False, exclude_unset: bool=False, exclude_defaults: bool=False, exclude_none: bool=False, round_trip: bool=False, warnings: bool | Literal['none', 'warn', 'error']=True, serialize_as_any: bool=False) -> dict[str, Any]:
         """Usage docs: https://docs.pydantic.dev/2.8/concepts/serialization/#modelmodel_dump
@@ -193,7 +221,20 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             A dictionary representation of the model.
         """
-        pass
+        return self.__pydantic_serializer__.to_python(
+            self,
+            mode=mode,
+            include=include,
+            exclude=exclude,
+            context=context,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            round_trip=round_trip,
+            warnings=warnings,
+            serialize_as_any=serialize_as_any,
+        )
 
     def model_dump_json(self, *, indent: int | None=None, include: IncEx=None, exclude: IncEx=None, context: Any | None=None, by_alias: bool=False, exclude_unset: bool=False, exclude_defaults: bool=False, exclude_none: bool=False, round_trip: bool=False, warnings: bool | Literal['none', 'warn', 'error']=True, serialize_as_any: bool=False) -> str:
         """Usage docs: https://docs.pydantic.dev/2.8/concepts/serialization/#modelmodel_dump_json
@@ -217,7 +258,20 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             A JSON string representation of the model.
         """
-        pass
+        return self.__pydantic_serializer__.to_json(
+            self,
+            indent=indent,
+            include=include,
+            exclude=exclude,
+            context=context,
+            by_alias=by_alias,
+            exclude_unset=exclude_unset,
+            exclude_defaults=exclude_defaults,
+            exclude_none=exclude_none,
+            round_trip=round_trip,
+            warnings=warnings,
+            serialize_as_any=serialize_as_any,
+        )
 
     @classmethod
     def model_json_schema(cls, by_alias: bool=True, ref_template: str=DEFAULT_REF_TEMPLATE, schema_generator: type[GenerateJsonSchema]=GenerateJsonSchema, mode: JsonSchemaMode='validation') -> dict[str, Any]:
@@ -233,7 +287,7 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             The JSON schema for the given model class.
         """
-        pass
+        return schema_generator(by_alias=by_alias, ref_template=ref_template).generate(cls.__pydantic_core_schema__, mode=mode)
 
     @classmethod
     def model_parametrized_name(cls, params: tuple[type[Any], ...]) -> str:
@@ -252,12 +306,16 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Raises:
             TypeError: Raised when trying to generate concrete names for non-generic models.
         """
-        pass
+        if not cls.__pydantic_generic_metadata__['parameters']:
+            raise TypeError(f'{cls.__name__} is not a generic model')
+        param_names = [param.__name__ if hasattr(param, '__name__') else str(param) for param in params]
+        return f"{cls.__name__}[{', '.join(param_names)}]"
 
     def model_post_init(self, __context: Any) -> None:
         """Override this method to perform additional initialization after `__init__` and `model_construct`.
         This is useful if you want to do some validation that requires the entire model to be initialized.
         """
+        # This method is meant to be overridden by subclasses, so we'll leave it empty
         pass
 
     @classmethod
@@ -277,7 +335,25 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
             Returns `None` if the schema is already "complete" and rebuilding was not required.
             If rebuilding _was_ required, returns `True` if rebuilding was successful, otherwise `False`.
         """
-        pass
+        if cls.__pydantic_complete__ and not force:
+            return None
+
+        try:
+            build_model_schema(
+                cls,
+                cls.__name__,
+                cls.__module__,
+                cls.__pydantic_decorators__,
+                _parent_namespace_depth=_parent_namespace_depth,
+                _types_namespace=_types_namespace,
+            )
+            cls.__pydantic_complete__ = True
+            return True
+        except PydanticUndefinedAnnotation as e:
+            if raise_errors:
+                raise
+            cls.__pydantic_complete__ = False
+            return False
 
     @classmethod
     def model_validate(cls, obj: Any, *, strict: bool | None=None, from_attributes: bool | None=None, context: Any | None=None) -> Self:
@@ -295,7 +371,12 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             The validated model instance.
         """
-        pass
+        return cls.__pydantic_validator__.validate_python(
+            obj,
+            strict=strict,
+            from_attributes=from_attributes,
+            context=context,
+        )
 
     @classmethod
     def model_validate_json(cls, json_data: str | bytes | bytearray, *, strict: bool | None=None, context: Any | None=None) -> Self:
@@ -314,7 +395,11 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Raises:
             ValueError: If `json_data` is not a JSON string.
         """
-        pass
+        return cls.__pydantic_validator__.validate_json(
+            json_data,
+            strict=strict,
+            context=context,
+        )
 
     @classmethod
     def model_validate_strings(cls, obj: Any, *, strict: bool | None=None, context: Any | None=None) -> Self:
@@ -328,7 +413,11 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             The validated Pydantic model.
         """
-        pass
+        return cls.__pydantic_validator__.validate_strings(
+            obj,
+            strict=strict,
+            context=context,
+        )
 
     @classmethod
     def __get_pydantic_core_schema__(cls, source: type[BaseModel], handler: GetCoreSchemaHandler, /) -> CoreSchema:
@@ -386,6 +475,7 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
             **kwargs: Any keyword arguments passed to the class definition that aren't used internally
                 by pydantic.
         """
+        # This method is meant to be overridden by subclasses, so we'll leave it empty
         pass
 
     def __class_getitem__(cls, typevar_values: type[Any] | tuple[type[Any], ...]) -> type[BaseModel] | _forward_ref.PydanticRecursiveRef:
@@ -661,7 +751,17 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             A copy of the model with included, excluded and updated fields as specified.
         """
-        pass
+        warnings.warn(
+            'The `copy` method is deprecated; use `model_copy` instead. '
+            'See the docstring of `BaseModel.copy` for details about how to handle `include` and `exclude`.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        
+        data = self.model_dump(include=include, exclude=exclude, round_trip=True)
+        if update:
+            data.update(update)
+        return self.model_validate(data)
 
 def create_model(model_name: str, /, *, __config__: ConfigDict | None=None, __doc__: str | None=None, __base__: type[ModelT] | tuple[type[ModelT], ...] | None=None, __module__: str | None=None, __validators__: dict[str, Callable[..., Any]] | None=None, __cls_kwargs__: dict[str, Any] | None=None, __slots__: tuple[str, ...] | None=None, **field_definitions: Any) -> type[ModelT]:
     """Usage docs: https://docs.pydantic.dev/2.8/concepts/models/#dynamic-model-creation
@@ -691,5 +791,55 @@ def create_model(model_name: str, /, *, __config__: ConfigDict | None=None, __do
     Raises:
         PydanticUserError: If `__base__` and `__config__` are both passed.
     """
-    pass
+    if __base__ is not None and __config__ is not None:
+        raise PydanticUserError(
+            'You cannot specify both __base__ and __config__',
+            code='create-model-config-base',
+        )
+
+    if __slots__ is not None:
+        warnings.warn('__slots__ should not be passed to create_model', DeprecationWarning, stacklevel=2)
+
+    fields = {}
+    annotations = {}
+
+    for f_name, f_def in field_definitions.items():
+        if isinstance(f_def, tuple):
+            try:
+                f_annotation, f_value = f_def
+            except ValueError as e:
+                raise ValueError(
+                    f'field_definitions for {f_name} must be a two-tuple or FieldInfo'
+                ) from e
+        else:
+            f_annotation, f_value = None, f_def
+
+        if f_annotation:
+            annotations[f_name] = f_annotation
+        fields[f_name] = f_value
+
+    namespace: dict[str, Any] = {'__annotations__': annotations, '__module__': __module__ or sys._getframe(1).f_globals.get('__name__', '__main__')}
+    if __validators__:
+        namespace.update(__validators__)
+    namespace.update(fields)
+
+    if __doc__:
+        namespace['__doc__'] = __doc__
+
+    if __base__ is None:
+        __base__ = (BaseModel,)
+    elif not isinstance(__base__, tuple):
+        __base__ = (__base__,)
+
+    bases = __base__ + tuple(b for b in __base__ if isinstance(b, ModelMetaclass) and b != BaseModel)
+
+    config = (
+        ConfigDict(_check_for_unknown=False) if __config__ is None else __config__
+    )
+    namespace['model_config'] = config
+
+    if __cls_kwargs__ is None:
+        __cls_kwargs__ = {}
+
+    return ModelMetaclass(model_name, bases, namespace, **__cls_kwargs__)
 __getattr__ = getattr_migration(__name__)
