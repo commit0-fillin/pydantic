@@ -162,6 +162,11 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
                 fields_values[name] = value
             elif cls.model_config.get('extra') == 'allow':
                 extra[name] = value
+        
+        for field_name, field in cls.model_fields.items():
+            if field_name not in fields_values and field.default is not PydanticUndefined:
+                fields_values[field_name] = field.get_default()
+
         _object_setattr(m, '__dict__', fields_values)
         _object_setattr(m, '__pydantic_extra__', extra or None)
         _object_setattr(m, '__pydantic_fields_set__', _fields_set or set(fields_values.keys()))
@@ -221,20 +226,77 @@ class BaseModel(metaclass=_model_construction.ModelMetaclass):
         Returns:
             A dictionary representation of the model.
         """
-        return self.__pydantic_serializer__.to_python(
-            self,
-            mode=mode,
-            include=include,
-            exclude=exclude,
-            context=context,
-            by_alias=by_alias,
-            exclude_unset=exclude_unset,
-            exclude_defaults=exclude_defaults,
-            exclude_none=exclude_none,
-            round_trip=round_trip,
-            warnings=warnings,
-            serialize_as_any=serialize_as_any,
-        )
+        result = {}
+        for field_name, field in self.model_fields.items():
+            if include and field_name not in include:
+                continue
+            if exclude and field_name in exclude:
+                continue
+            
+            value = getattr(self, field_name)
+            
+            if exclude_unset and field_name not in self.__pydantic_fields_set__:
+                continue
+            if exclude_defaults and value == field.default:
+                continue
+            if exclude_none and value is None:
+                continue
+            
+            if by_alias and field.alias:
+                field_name = field.alias
+            
+            if isinstance(value, BaseModel):
+                value = value.model_dump(
+                    mode=mode,
+                    include=include,
+                    exclude=exclude,
+                    by_alias=by_alias,
+                    exclude_unset=exclude_unset,
+                    exclude_defaults=exclude_defaults,
+                    exclude_none=exclude_none,
+                    round_trip=round_trip,
+                    warnings=warnings,
+                    serialize_as_any=serialize_as_any,
+                )
+            elif isinstance(value, list):
+                value = [
+                    v.model_dump(
+                        mode=mode,
+                        include=include,
+                        exclude=exclude,
+                        by_alias=by_alias,
+                        exclude_unset=exclude_unset,
+                        exclude_defaults=exclude_defaults,
+                        exclude_none=exclude_none,
+                        round_trip=round_trip,
+                        warnings=warnings,
+                        serialize_as_any=serialize_as_any,
+                    ) if isinstance(v, BaseModel) else v
+                    for v in value
+                ]
+            elif isinstance(value, dict):
+                value = {
+                    k: v.model_dump(
+                        mode=mode,
+                        include=include,
+                        exclude=exclude,
+                        by_alias=by_alias,
+                        exclude_unset=exclude_unset,
+                        exclude_defaults=exclude_defaults,
+                        exclude_none=exclude_none,
+                        round_trip=round_trip,
+                        warnings=warnings,
+                        serialize_as_any=serialize_as_any,
+                    ) if isinstance(v, BaseModel) else v
+                    for k, v in value.items()
+                }
+            
+            result[field_name] = value
+        
+        if self.model_config.get('extra') == 'allow' and self.__pydantic_extra__:
+            result.update(self.__pydantic_extra__)
+        
+        return result
 
     def model_dump_json(self, *, indent: int | None=None, include: IncEx=None, exclude: IncEx=None, context: Any | None=None, by_alias: bool=False, exclude_unset: bool=False, exclude_defaults: bool=False, exclude_none: bool=False, round_trip: bool=False, warnings: bool | Literal['none', 'warn', 'error']=True, serialize_as_any: bool=False) -> str:
         """Usage docs: https://docs.pydantic.dev/2.8/concepts/serialization/#modelmodel_dump_json
