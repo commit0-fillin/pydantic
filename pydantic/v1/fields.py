@@ -86,13 +86,19 @@ class FieldInfo(Representation):
 
         :return: the constraints set on field_info
         """
-        pass
+        return {
+            attr
+            for attr, default in self.__field_constraints__.items()
+            if getattr(self, attr) != default
+        }
 
     def update_from_config(self, from_config: Dict[str, Any]) -> None:
         """
-        Update this FieldInfo based on a dict from get_field_info, only fields which have not been set are dated.
+        Update this FieldInfo based on a dict from get_field_info, only fields which have not been set are updated.
         """
-        pass
+        for key, value in from_config.items():
+            if getattr(self, key) is None:
+                setattr(self, key, value)
 
 def Field(default: Any=Undefined, *, default_factory: Optional[NoArgAnyCallable]=None, alias: Optional[str]=None, title: Optional[str]=None, description: Optional[str]=None, exclude: Optional[Union['AbstractSetIntStr', 'MappingIntStrAny', Any]]=None, include: Optional[Union['AbstractSetIntStr', 'MappingIntStrAny', Any]]=None, const: Optional[bool]=None, gt: Optional[float]=None, ge: Optional[float]=None, lt: Optional[float]=None, le: Optional[float]=None, multiple_of: Optional[float]=None, allow_inf_nan: Optional[bool]=None, max_digits: Optional[int]=None, decimal_places: Optional[int]=None, min_items: Optional[int]=None, max_items: Optional[int]=None, unique_items: Optional[bool]=None, min_length: Optional[int]=None, max_length: Optional[int]=None, allow_mutation: bool=True, regex: Optional[str]=None, discriminator: Optional[str]=None, repr: bool=True, **extra: Any) -> Any:
     """
@@ -210,7 +216,23 @@ class ModelField(Representation):
         :param config: the model's config object
         :return: the FieldInfo contained in the `annotation`, the value, or a new one from the config.
         """
-        pass
+        field_info = None
+        if get_origin(annotation) is Annotated:
+            annotation_args = get_args(annotation)
+            for arg in annotation_args[1:]:
+                if isinstance(arg, FieldInfo):
+                    if field_info is not None:
+                        raise ValueError(f'Found multiple FieldInfo annotations for {field_name}')
+                    field_info = arg
+
+        if field_info is None and isinstance(value, FieldInfo):
+            field_info = value
+            value = value.default
+
+        if field_info is None:
+            field_info = FieldInfo(default=value)
+
+        return field_info, value
 
     def prepare(self) -> None:
         """
